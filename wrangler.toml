@@ -1,0 +1,15 @@
+name = "consia-api"
+main = "worker.js"
+compatibility_date = "2026-01-09"
+workers_dev = true
+
+account_id = "TU_ACCOUNT_ID_ACA"
+
+[durable_objects]
+bindings = [
+  { name = "PORTAL", class_name = "CONSIA_PORTAL" }
+]
+
+[[migrations]]
+tag = "v1"
+new_classes = ["CONSIA_PORTAL"]
