@@ -3,7 +3,8 @@ main = "worker.js"
 compatibility_date = "2026-01-09"
 workers_dev = true
 
-account_id = "TU_ACCOUNT_ID_ACA"
+# PONÉ TU ACCOUNT ID REAL (Cloudflare > Right sidebar / Account Home)
+account_id = "REEMPLAZAR_POR_TU_ACCOUNT_ID"
 
 [durable_objects]
 bindings = [
