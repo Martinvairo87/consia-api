@@ -1,23 +1,12 @@
 name = "consia-api"
 main = "worker.js"
 compatibility_date = "2026-01-09"
-workers_dev = true
-
-account_id = "TU_ACCOUNT_ID_DE_CLOUDFLARE"
 
 [durable_objects]
 bindings = [
-  { name = "MEMORY", class_name = "CONSIA_MEMORY" },
-  { name = "IDENTITY", class_name = "CONSIA_IDENTITY" },
-  { name = "UI_STATE", class_name = "CONSIA_UI_STATE" },
-  { name = "OWNER", class_name = "CONSIA_OWNER" }
+  { name = "CONSIA_PORTAL", class_name = "CONSIA_PORTAL" }
 ]
 
 [[migrations]]
-tag = "v2"
-new_classes = [
-  "CONSIA_MEMORY",
-  "CONSIA_IDENTITY",
-  "CONSIA_UI_STATE",
-  "CONSIA_OWNER"
-]
+tag = "v1"
+new_classes = ["CONSIA_PORTAL"]
