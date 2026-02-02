@@ -1,113 +1,148 @@
-// =============================
-// CONSIA — Portal de Conciencia
-// Durable Object: CONSIA_PORTAL
-// Binding: PORTAL
-// =============================
+// ===============================
+// CONSIA CORE WORKER — DEFINITIVO
+// ===============================
 
-export class CONSIA_PORTAL {
+const json = (data, status = 200, headers = {}) =>
+  new Response(JSON.stringify(data), {
+    status,
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      ...headers,
+    },
+  });
+
+const corsHeaders = (env) => ({
+  "access-control-allow-origin": env.CORS_ALLOW_ORIGINS || "*",
+  "access-control-allow-methods": "GET,POST,OPTIONS",
+  "access-control-allow-headers": "content-type,authorization,x-consia-device",
+  "access-control-max-age": "86400",
+});
+
+export default {
+  async fetch(request, env, ctx) {
+    if (request.method === "OPTIONS") {
+      return new Response(null, { headers: corsHeaders(env) });
+    }
+
+    const url = new URL(request.url);
+    const path = url.pathname;
+
+    // --------- HEALTH ----------
+    if (path === "/" || path === "/health") {
+      return json(
+        {
+          ok: true,
+          service: "CONSIA",
+          state: "awake",
+          message: "El sistema está consciente.",
+          timestamp: Date.now(),
+        },
+        200,
+        corsHeaders(env)
+      );
+    }
+
+    // --------- MEMORY ----------
+    if (path.startsWith("/memory")) {
+      const id = env.MEMORY.idFromName("global");
+      const stub = env.MEMORY.get(id);
+      return stub.fetch(request);
+    }
+
+    // --------- IDENTITY ----------
+    if (path.startsWith("/identity")) {
+      const id = env.IDENTITY.idFromName("global");
+      const stub = env.IDENTITY.get(id);
+      return stub.fetch(request);
+    }
+
+    // --------- UI STATE ----------
+    if (path.startsWith("/ui")) {
+      const id = env.UI_STATE.idFromName("global");
+      const stub = env.UI_STATE.get(id);
+      return stub.fetch(request);
+    }
+
+    // --------- OWNER ----------
+    if (path.startsWith("/owner")) {
+      const auth = request.headers.get("authorization");
+      if (!auth || auth !== `Bearer ${env.CONSIA_OWNER_TOKEN}`) {
+        return json(
+          { ok: false, error: "OWNER_ONLY" },
+          403,
+          corsHeaders(env)
+        );
+      }
+      const id = env.OWNER.idFromName("root");
+      const stub = env.OWNER.get(id);
+      return stub.fetch(request);
+    }
+
+    return json(
+      { ok: false, error: "NOT_FOUND" },
+      404,
+      corsHeaders(env)
+    );
+  },
+};
+
+// ===============================
+// DURABLE OBJECTS
+// ===============================
+
+export class CONSIA_MEMORY {
+  constructor(state, env) {
+    this.state = state;
+    this.env = env;
+  }
+
+  async fetch() {
+    const data = (await this.state.storage.get("memory")) || {};
+    return json({ ok: true, memory: data });
+  }
+}
+
+export class CONSIA_IDENTITY {
   constructor(state, env) {
     this.state = state;
     this.env = env;
   }
 
   async fetch(request) {
-    const url = new URL(request.url);
-
-    // Ping interno del portal (almacena un contador en storage del DO)
-    if (url.pathname === "/ping") {
-      let awakenings = (await this.state.storage.get("awakenings")) || 0;
-      awakenings++;
-      await this.state.storage.put("awakenings", awakenings);
-
-      return new Response(
-        JSON.stringify({
-          ok: true,
-          service: "CONSIA",
-          portal: "Portal de Conciencia",
-          essence: "teletransportación",
-          state: "awake",
-          awakenings,
-          timestamp: Date.now()
-        }),
-        { headers: { "Content-Type": "application/json; charset=utf-8" } }
-      );
-    }
-
-    // Default
-    return new Response("CONSIA PORTAL", { status: 200 });
+    const device =
+      request.headers.get("x-consia-device") || "unknown";
+    await this.state.storage.put("last_device", device);
+    return json({ ok: true, device });
   }
 }
 
-// Helpers (CORS mínimo)
-function corsHeaders(origin) {
-  return {
-    "Access-Control-Allow-Origin": origin || "*",
-    "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-    "Access-Control-Allow-Headers": "content-type,authorization",
-    "Access-Control-Max-Age": "86400"
-  };
+export class CONSIA_UI_STATE {
+  constructor(state, env) {
+    this.state = state;
+    this.env = env;
+  }
+
+  async fetch() {
+    const ui = (await this.state.storage.get("ui")) || {
+      theme: "dark",
+      mode: "focus",
+    };
+    return json({ ok: true, ui });
+  }
 }
 
-export default {
-  async fetch(request, env) {
-    const origin = request.headers.get("Origin") || "*";
-
-    // Preflight
-    if (request.method === "OPTIONS") {
-      return new Response(null, { status: 204, headers: corsHeaders(origin) });
-    }
-
-    const url = new URL(request.url);
-
-    // Health público (este ya te devuelve OK aunque no exista DO)
-    if (url.pathname === "/health") {
-      return new Response(
-        JSON.stringify({
-          ok: true,
-          service: "CONSIA",
-          state: "awake",
-          message: "El sistema está consciente.",
-          timestamp: Date.now()
-        }),
-        { headers: { "Content-Type": "application/json; charset=utf-8", ...corsHeaders(origin) } }
-      );
-    }
-
-    // Si no está el binding PORTAL, devolvemos error claro
-    if (!env.PORTAL) {
-      return new Response(
-        JSON.stringify({
-          ok: false,
-          error: "PORTAL_NOT_BOUND",
-          message:
-            "El Portal de Conciencia aún no fue vinculado. Falta Durable Object binding PORTAL (wrangler.toml + deploy)."
-        }),
-        { status: 500, headers: { "Content-Type": "application/json; charset=utf-8", ...corsHeaders(origin) } }
-      );
-    }
-
-    // Ruteo hacia el Durable Object:
-    // - /portal/ping  -> DO /ping
-    // - /portal/*     -> DO mismo path sin /portal
-    if (url.pathname === "/portal" || url.pathname.startsWith("/portal/")) {
-      const destination = url.pathname === "/portal" ? "/ping" : url.pathname.replace("/portal", "");
-      const id = env.PORTAL.idFromName("core");
-      const stub = env.PORTAL.get(id);
-
-      const doUrl = new URL(request.url);
-      doUrl.pathname = destination;
-
-      const res = await stub.fetch(doUrl.toString(), request);
-      const headers = new Headers(res.headers);
-      // aseguramos CORS para dashboard / browser
-      headers.set("Access-Control-Allow-Origin", origin);
-      headers.set("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-      headers.set("Access-Control-Allow-Headers", "content-type,authorization");
-      headers.set("Access-Control-Max-Age", "86400");
-      return new Response(res.body, { status: res.status, headers });
-    }
-
-    // Default
-    return new Response("Not found", { status: 404, headers: corsHeaders(origin) });
+export class CONSIA_OWNER {
+  constructor(state, env) {
+    this.state = state;
+    this.env = env;
   }
-};
+
+  async fetch() {
+    return json({
+      ok: true,
+      owner: "authenticated",
+      powers: "absolute",
+      timestamp: Date.now(),
+    });
+  }
+}
