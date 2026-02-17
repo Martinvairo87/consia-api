@@ -1,13 +1,12 @@
 name = "consia-api"
 main = "worker.js"
-compatibility_date = "2026-01-01"
+compatibility_date = "2026-02-16"
 
 [durable_objects]
 bindings = [
-  { name = "CONSIA_STATE", class_name = "ConsiaState" },
-  { name = "ROOM", class_name = "RoomDO" }
+  { name = "CONSIA_STATE", class_name = "ConsiaState" }
 ]
 
 [[migrations]]
 tag = "v1"
-new_classes = ["ConsiaState","RoomDO"]
+new_classes = ["ConsiaState"]
