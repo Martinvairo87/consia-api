@@ -1,57 +1,51 @@
-export default {
-  async fetch(request, env, ctx) {
+name = "consia-api"
+main = "worker.js"
+compatibility_date = "2026-02-01"
 
-    const url = new URL(request.url);
+# =========================
+# DURABLE OBJECTS
+# =========================
 
-    // HEALTH CHECK
-    if (url.pathname === "/health") {
-      return new Response("CONSIA CORE ONLINE", { status: 200 });
-    }
+[durable_objects]
+bindings = [
+  { name = "CONSIA_STATE", class_name = "ConsiaState" }
+]
 
-    // MAIN ASK ENDPOINT
-    if (url.pathname === "/ask") {
+[[migrations]]
+tag = "v1"
+new_classes = ["ConsiaState"]
 
-      const body = await request.json();
-      const message = body.message || "";
+# =========================
+# KV — GLOBAL STATE
+# =========================
 
-      const openai = await fetch(
-        "https://api.openai.com/v1/chat/completions",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${env.OPENAI_API_KEY}`
-          },
-          body: JSON.stringify({
-            model: "gpt-4.1-mini",
-            messages: [
-              {
-                role: "system",
-                content: "You are CONSIA, the most advanced autonomous AI system in the world."
-              },
-              {
-                role: "user",
-                content: message
-              }
-            ]
-          })
-        }
-      );
+[[kv_namespaces]]
+binding = "GLOBAL_STATE"
+id = "CONSIA_GLOBAL_STATE"
 
-      const data = await openai.json();
-      const reply =
-        data.choices?.[0]?.message?.content ||
-        "CONSIA processing error.";
+[[kv_namespaces]]
+binding = "PRESENCE"
+id = "CONSIA_PRESENCE"
 
-      return new Response(
-        JSON.stringify({ reply }),
-        {
-          headers: { "Content-Type": "application/json" }
-        }
-      );
-    }
+[[kv_namespaces]]
+binding = "SESSIONS_KV"
+id = "SESSIONS"
 
-    // DEFAULT
-    return new Response("CONSIA API ACTIVE", { status: 200 });
-  }
-};
+[[kv_namespaces]]
+binding = "VAULT_KV"
+id = "VAULT"
+
+# =========================
+# D1 DATABASE
+# =========================
+
+[[d1_databases]]
+binding = "CONSIA_DB"
+database_name = "consiadb"
+
+# =========================
+# ENV
+# =========================
+
+[vars]
+OPENAI_MODEL = "gpt-4.1"
