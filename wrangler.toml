@@ -1,51 +1,122 @@
-name = "consia-api"
-main = "worker.js"
-compatibility_date = "2026-02-01"
+/* ================================
+   CONSIA GLOBAL REALTIME — FINAL v2
+   Rooms (DO) + Signaling (DO) + Voice WS + Avatar Sync + iOS Bridge
+================================ */
 
-# =========================
-# DURABLE OBJECTS
-# =========================
+const CORS = {
+  "access-control-allow-origin": "*",
+  "access-control-allow-methods": "GET,POST,OPTIONS",
+  "access-control-allow-headers": "content-type,authorization,x-consia-device,x-consia-session",
+};
 
-[durable_objects]
-bindings = [
-  { name = "CONSIA_STATE", class_name = "ConsiaState" }
-]
+function json(data, status = 200) {
+  return new Response(JSON.stringify(data, null, 2), {
+    status,
+    headers: { "content-type": "application/json", ...CORS },
+  });
+}
+function ok(text = "OK") {
+  return new Response(text, { status: 200, headers: { ...CORS } });
+}
+async function readJson(req) {
+  const ct = req.headers.get("content-type") || "";
+  if (!ct.includes("application/json")) return null;
+  return await req.json();
+}
 
-[[migrations]]
-tag = "v1"
-new_classes = ["ConsiaState"]
+/* ================================
+   DO: ROOM STATE (WS broadcast + persistence hooks)
+================================ */
+export class ConsiaState {
+  constructor(state, env) {
+    this.state = state;
+    this.env = env;
+    this.sockets = new Map();
+  }
 
-# =========================
-# KV — GLOBAL STATE
-# =========================
+  async fetch(request) {
+    const url = new URL(request.url);
 
-[[kv_namespaces]]
-binding = "GLOBAL_STATE"
-id = "CONSIA_GLOBAL_STATE"
+    // WS JOIN: /join
+    if (url.pathname === "/join") {
+      const pair = new WebSocketPair();
+      const client = pair[0];
+      const server = pair[1];
 
-[[kv_namespaces]]
-binding = "PRESENCE"
-id = "CONSIA_PRESENCE"
+      const id = crypto.randomUUID();
+      this.sockets.set(id, server);
+      server.accept();
 
-[[kv_namespaces]]
-binding = "SESSIONS_KV"
-id = "SESSIONS"
+      // replay last messages (light)
+      const last = await this.state.storage.get("last_msgs");
+      if (Array.isArray(last)) {
+        for (const m of last.slice(-20)) {
+          try { server.send(JSON.stringify({ t: "replay", p: m })); } catch {}
+        }
+      }
 
-[[kv_namespaces]]
-binding = "VAULT_KV"
-id = "VAULT"
+      server.addEventListener("message", async (event) => {
+        const raw = event.data;
 
-# =========================
-# D1 DATABASE
-# =========================
+        // persist ring buffer
+        let ring = (await this.state.storage.get("last_msgs")) || [];
+        ring.push(raw);
+        if (ring.length > 200) ring = ring.slice(-200);
+        await this.state.storage.put("last_msgs", ring);
 
-[[d1_databases]]
-binding = "CONSIA_DB"
-database_name = "consiadb"
+        // presence TTL
+        await this.env.PRESENCE.put(id, "online", { expirationTtl: 60 });
 
-# =========================
-# ENV
-# =========================
+        // broadcast
+        for (const [sid, sock] of this.sockets) {
+          if (sock !== server) {
+            try { sock.send(raw); } catch {}
+          }
+        }
 
-[vars]
-OPENAI_MODEL = "gpt-4.1"
+        // global breadcrumb
+        await this.env.GLOBAL_STATE.put(`room-msg-${Date.now()}`, raw);
+      });
+
+      server.addEventListener("close", async () => {
+        this.sockets.delete(id);
+        await this.env.PRESENCE.delete(id);
+      });
+
+      return new Response(null, { status: 101, webSocket: client });
+    }
+
+    return ok("CONSIA ROOM ACTIVE");
+  }
+}
+
+/* ================================
+   DO: SIGNALING (WebRTC offer/answer/ice) — persistent room signaling
+================================ */
+export class ConsiaSignal {
+  constructor(state, env) {
+    this.state = state;
+    this.env = env;
+  }
+
+  async fetch(request) {
+    const url = new URL(request.url);
+
+    if (request.method === "OPTIONS") return new Response("", { headers: CORS });
+
+    // POST /push  {to, from, type, data}
+    if (request.method === "POST" && url.pathname === "/push") {
+      const body = await readJson(request);
+      if (!body || !body.to || !body.type) return json({ ok: false }, 400);
+
+      const key = `inbox:${body.to}`;
+      const inbox = (await this.state.storage.get(key)) || [];
+      inbox.push({ ...body, ts: Date.now() });
+      if (inbox.length > 200) inbox.splice(0, inbox.length - 200);
+      await this.state.storage.put(key, inbox);
+
+      return json({ ok: true });
+    }
+
+    // POST /poll {id} -> returns inbox then clears
+    if (request.method ===
