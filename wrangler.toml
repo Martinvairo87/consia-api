@@ -1,5 +1,5 @@
 name = "consia-api-v2"
-main = "worker.js"
+main = "src/index.ts"
 compatibility_date = "2026-01-01"
 
 [[durable_objects.bindings]]
@@ -8,4 +8,4 @@ class_name = "ConsiaState"
 
 [[migrations]]
 tag = "v1"
-new_classes = ["ConsiaState"]
+new_sqlite_classes = ["ConsiaState"]
