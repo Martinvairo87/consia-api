@@ -1,6 +1,6 @@
 name = "consia-api-v2"
-main = "src/index.ts"
-compatibility_date = "2026-01-01"
+main = "src/index.js"
+compatibility_date = "2026-02-20"
 
 [[durable_objects.bindings]]
 name = "MEETING_DO"
