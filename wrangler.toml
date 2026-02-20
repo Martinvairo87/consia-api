@@ -2,12 +2,10 @@ name = "consia-api"
 main = "worker.js"
 compatibility_date = "2026-01-01"
 
-# Durable Object binding
 [[durable_objects.bindings]]
 name = "MEETING_DO"
 class_name = "ConsiaState"
 
-# Migration required for DO
 [[migrations]]
 tag = "v1"
 new_classes = ["ConsiaState"]
