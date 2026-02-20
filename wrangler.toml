@@ -1,45 +1,13 @@
 name = "consia-api"
 main = "worker.js"
-compatibility_date = "2025-02-01"
-workers_dev = true
+compatibility_date = "2026-01-01"
 
-# ===== Durable Objects =====
-[durable_objects]
-bindings = [
-  { name = "CONSIA_STATE", class_name = "ConsiaState" }
-]
+# Durable Object binding
+[[durable_objects.bindings]]
+name = "MEETING_DO"
+class_name = "ConsiaState"
 
+# Migration required for DO
 [[migrations]]
 tag = "v1"
 new_classes = ["ConsiaState"]
-
-# ===== KV (si ya los tenés en Dashboard, dejalo igual) =====
-[[kv_namespaces]]
-binding = "GLOBAL_STATE"
-id = "REEMPLAZAR_POR_ID_KV_CONSIA_GLOBAL_STATE"
-
-[[kv_namespaces]]
-binding = "PRESENCE"
-id = "REEMPLAZAR_POR_ID_KV_CONSIA_PRESENCE"
-
-[[kv_namespaces]]
-binding = "SESSIONS_KV"
-id = "REEMPLAZAR_POR_ID_KV_SESSIONS"
-
-[[kv_namespaces]]
-binding = "VAULT_KV"
-id = "REEMPLAZAR_POR_ID_KV_VAULT"
-
-[[kv_namespaces]]
-binding = "AUDIT_KV"
-id = "REEMPLAZAR_POR_ID_KV_AUDIT"
-
-# ===== D1 (si usás D1) =====
-[[d1_databases]]
-binding = "CONSIA_DB"
-database_name = "consia-db"
-database_id = "REEMPLAZAR_POR_ID_D1"
-
-# ===== Workers AI binding =====
-# En Dashboard: Settings -> Bindings -> Add -> Workers AI -> name: AI
-# (No va en toml, pero lo dejo como referencia)
