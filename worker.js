@@ -1,51 +1,65 @@
-name = "consia-api"
-main = "worker.js"
-compatibility_date = "2026-02-01"
+export class ConsiaState {
+  constructor(state, env) {
+    this.state = state
+    this.env = env
+    this.sessions = new Map()
+  }
 
-# =========================
-# DURABLE OBJECTS
-# =========================
+  handleSession(ws) {
+    ws.accept()
 
-[durable_objects]
-bindings = [
-  { name = "CONSIA_STATE", class_name = "ConsiaState" }
-]
+    const id = crypto.randomUUID()
+    this.sessions.set(id, ws)
 
-[[migrations]]
-tag = "v1"
-new_classes = ["ConsiaState"]
+    ws.addEventListener("message", (evt) => {
+      // broadcast
+      for (const client of this.sessions.values()) {
+        try { client.send(evt.data) } catch (_) {}
+      }
+    })
 
-# =========================
-# KV — GLOBAL STATE
-# =========================
+    ws.addEventListener("close", () => {
+      this.sessions.delete(id)
+    })
 
-[[kv_namespaces]]
-binding = "GLOBAL_STATE"
-id = "CONSIA_GLOBAL_STATE"
+    ws.addEventListener("error", () => {
+      this.sessions.delete(id)
+      try { ws.close() } catch (_) {}
+    })
+  }
 
-[[kv_namespaces]]
-binding = "PRESENCE"
-id = "CONSIA_PRESENCE"
+  async fetch(request) {
+    if (request.headers.get("Upgrade") !== "websocket") {
+      return new Response("Expected websocket", { status: 400 })
+    }
 
-[[kv_namespaces]]
-binding = "SESSIONS_KV"
-id = "SESSIONS"
+    const pair = new WebSocketPair()
+    const client = pair[0]
+    const server = pair[1]
 
-[[kv_namespaces]]
-binding = "VAULT_KV"
-id = "VAULT"
+    this.handleSession(server)
 
-# =========================
-# D1 DATABASE
-# =========================
+    return new Response(null, { status: 101, webSocket: client })
+  }
+}
 
-[[d1_databases]]
-binding = "CONSIA_DB"
-database_name = "consiadb"
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url)
 
-# =========================
-# ENV
-# =========================
+    // WS ROUTE
+    if (url.pathname === "/ws") {
+      const id = env.MEETING_DO.idFromName("global")
+      const obj = env.MEETING_DO.get(id)
+      return obj.fetch(request)
+    }
 
-[vars]
-OPENAI_MODEL = "gpt-4.1"
+    // HEALTH
+    if (url.pathname === "/health") {
+      return Response.json({ ok: true })
+    }
+
+    // DEFAULT
+    return new Response("CONSIA API ACTIVE")
+  }
+}
