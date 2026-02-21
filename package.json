@@ -1,5 +1,24 @@
 {
   "name": "consia-api",
   "version": "1.0.0",
-  "dependencies": {}
+  "private": true,
+  "description": "CONSIA API - Global AI Execution Core",
+  "author": "CONSIA",
+  "license": "UNLICENSED",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "wrangler dev --local",
+    "deploy": "wrangler deploy --config wrangler.toml",
+    "deploy:prod": "wrangler deploy --config wrangler.toml",
+    "tail": "wrangler tail",
+    "logs": "wrangler tail --format pretty",
+    "check": "wrangler deploy --dry-run",
+    "whoami": "wrangler whoami"
+  },
+  "devDependencies": {
+    "wrangler": "4.67.0"
+  }
 }
