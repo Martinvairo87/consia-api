@@ -1,10 +1,6 @@
 name = "consia-api"
 main = "worker.js"
 compatibility_date = "2026-02-01"
-workers_dev = true
-
-[vars]
-ENVIRONMENT = "prod"
 
 [durable_objects]
 bindings = [
