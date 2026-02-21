@@ -1,11 +1,15 @@
 {
   "name": "consia-api",
-  "version": "1.0.0",
   "private": true,
+  "version": "1.0.0",
+  "type": "module",
   "scripts": {
-    "deploy": "wrangler deploy",
-    "dev": "wrangler dev"
+    "deploy": "wrangler deploy --config wrangler.toml",
+    "dev": "wrangler dev --config wrangler.toml --remote",
+    "tail": "wrangler tail --config wrangler.toml",
+    "types": "wrangler types --config wrangler.toml"
   },
+  "dependencies": {},
   "devDependencies": {
     "wrangler": "^4.67.0"
   }
