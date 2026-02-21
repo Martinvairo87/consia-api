@@ -1,12 +1,53 @@
+# wrangler.toml — CONSIA API (definitivo)
+# ENTRYPOINT: worker.js
+
 name = "consia-api"
 main = "worker.js"
 compatibility_date = "2026-02-01"
 
+# ---------- Durable Objects ----------
 [durable_objects]
 bindings = [
   { name = "MEETING_DO", class_name = "ConsiaState" }
 ]
 
+# IMPORTANT (Free plan / DO sqlite namespace requirement)
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["ConsiaState"]
+
+# ---------- (OPCIONAL) KV / D1 ----------
+# Si ya los vinculaste por Dashboard, podés dejar esto comentado.
+# Si querés que TODO sea 100% reproducible por repo, completá los IDs y descomentá.
+
+# [[kv_namespaces]]
+# binding = "GLOBAL_STATE"
+# id = "PUT_YOUR_KV_ID"
+#
+# [[kv_namespaces]]
+# binding = "SESSIONS_KV"
+# id = "PUT_YOUR_KV_ID"
+#
+# [[kv_namespaces]]
+# binding = "PRESENCE"
+# id = "PUT_YOUR_KV_ID"
+#
+# [[kv_namespaces]]
+# binding = "AUDIT_KV"
+# id = "PUT_YOUR_KV_ID"
+#
+# [[kv_namespaces]]
+# binding = "VAULT_KV"
+# id = "PUT_YOUR_KV_ID"
+
+# [[d1_databases]]
+# binding = "CONSIA_DB"
+# database_name = "consiadb"
+# database_id = "PUT_YOUR_D1_ID"
+
+# ---------- Variables (NO secrets aquí) ----------
+[vars]
+ENVIRONMENT = "prod"
+# CORS_ALLOWLIST = "https://consia.world,https://admin.consia.world"
+# PRECHECK_USD_PER_REQUEST = "0.002"
+# EST_USD_PER_1K_TOKENS = "0.002"
