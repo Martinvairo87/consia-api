@@ -1,5 +1,3 @@
-# CONSIA API — wrangler.toml (DEFINITIVO)
-
 name = "consia-api"
 main = "worker.js"
 compatibility_date = "2026-02-01"
