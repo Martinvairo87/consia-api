@@ -1,12 +1,49 @@
+# wrangler.toml — CONSIA API (PRO definitivo)
+# ENTRYPOINT: worker.js
+
 name = "consia-api"
 main = "worker.js"
 compatibility_date = "2026-02-01"
 
+# ---- Durable Objects ----
 [durable_objects]
 bindings = [
   { name = "MEETING_DO", class_name = "ConsiaState" }
 ]
 
+# REQUIRED: DO migrations (para que ConsiaState quede registrado como DO)
 [[migrations]]
 tag = "v1"
-new_sqlite_classes = ["ConsiaState"]
+new_classes = ["ConsiaState"]
+
+# ---- Vars (no sensibles) ----
+[vars]
+ENVIRONMENT = "prod"
+
+# ---- (OPCIONAL) Bindings por repo (si ya los vinculaste por Dashboard podés OMITIR estos bloques)
+# Si querés que quede 100% reproducible por GitHub, completá IDs y descomentá.
+
+# [[kv_namespaces]]
+# binding = "GLOBAL_STATE"
+# id = "PUT_KV_ID"
+#
+# [[kv_namespaces]]
+# binding = "SESSIONS_KV"
+# id = "PUT_KV_ID"
+#
+# [[kv_namespaces]]
+# binding = "VAULT_KV"
+# id = "PUT_KV_ID"
+#
+# [[kv_namespaces]]
+# binding = "PRESENCE"
+# id = "PUT_KV_ID"
+#
+# [[kv_namespaces]]
+# binding = "AUDIT_KV"
+# id = "PUT_KV_ID"
+#
+# [[d1_databases]]
+# binding = "CONSIA_DB"
+# database_name = "consia_db"
+# database_id = "PUT_D1_ID"
