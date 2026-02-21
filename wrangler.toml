@@ -1,7 +1,7 @@
 # wrangler.toml — CONSIA API (definitivo)
 # ENTRYPOINT: worker.js
 
-name = "consia-api"
+name = "consia-api-v2"
 main = "worker.js"
 compatibility_date = "2026-02-01"
 
