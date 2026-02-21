@@ -1,10 +1,5 @@
-// =====================================================
-// CONSIA API — CORE WORKER — TOP 1 INFINITO
-// =====================================================
+// CONSIA API — WORKER DEFINITIVO TOP 1
 
-// -----------------------------
-// Durable Object
-// -----------------------------
 export class ConsiaState {
   constructor(state, env) {
     this.state = state
@@ -12,13 +7,8 @@ export class ConsiaState {
   }
 
   async fetch(request) {
-
-    // --- FIX 1101 ---
     if (request.headers.get("Upgrade") !== "websocket") {
-      return new Response("CONSIA WS READY", {
-        status: 200,
-        headers: { "content-type": "text/plain" }
-      })
+      return new Response("Expected WebSocket", { status: 400 })
     }
 
     const pair = new WebSocketPair()
@@ -41,85 +31,62 @@ export class ConsiaState {
 
       ws.send(JSON.stringify({
         type: "CONSIA_WS",
-        message: msg,
-        ts: Date.now()
+        message: msg
       }))
     })
-
-    ws.addEventListener("close", () => {})
   }
 }
 
-// -----------------------------
-// Worker Fetch
-// -----------------------------
 export default {
   async fetch(request, env) {
+    try {
 
-    const url = new URL(request.url)
+      const url = new URL(request.url)
 
-    // -----------------------------
-    // HEALTH
-    // -----------------------------
-    if (url.pathname === "/") {
-      return new Response("CONSIA API ACTIVE", {
-        headers: { "content-type": "text/plain" }
-      })
-    }
-
-    if (url.pathname === "/health") {
-      return Response.json({
-        status: "ok",
-        system: "CONSIA",
-        ts: Date.now()
-      })
-    }
-
-    // -----------------------------
-    // WS ROUTE
-    // -----------------------------
-    if (url.pathname === "/ws") {
-      const id = env.MEETING_DO.idFromName("global")
-      const obj = env.MEETING_DO.get(id)
-      return obj.fetch(request)
-    }
-
-    // -----------------------------
-    // ASK IA
-    // -----------------------------
-    if (url.pathname === "/ask") {
-
-      if (request.method !== "POST") {
-        return new Response("POST required", { status: 405 })
+      // ROOT
+      if (url.pathname === "/") {
+        return new Response("CONSIA API ACTIVE", {
+          headers: { "content-type": "text/plain" }
+        })
       }
 
-      const body = await request.json().catch(() => ({}))
-      const message = body.message || "empty"
+      // ASK ENDPOINT
+      if (url.pathname === "/ask") {
+        return new Response(JSON.stringify({
+          status: "ok",
+          message: "CONSIA AI READY"
+        }), {
+          headers: { "content-type": "application/json" }
+        })
+      }
 
-      // ---- DEMO IA ----
-      // (Luego conectamos OpenAI real)
+      // WS ROUTE
+      if (url.pathname === "/ws") {
+        const id = env.MEETING_DO.idFromName("global")
+        const obj = env.MEETING_DO.get(id)
+        return obj.fetch(request)
+      }
 
-      return Response.json({
-        system: "CONSIA",
-        reply: `Procesado: ${message}`,
-        ts: Date.now()
-      })
+      // MEET PING
+      if (url.pathname === "/meet/ping") {
+        return new Response(JSON.stringify({
+          meet: "active",
+          realtime: "ok"
+        }), {
+          headers: { "content-type": "application/json" }
+        })
+      }
+
+      return new Response("Not Found", { status: 404 })
+
+    } catch (err) {
+      return new Response(
+        JSON.stringify({
+          error: "Worker Exception",
+          detail: err.message
+        }),
+        { status: 500 }
+      )
     }
-
-    // -----------------------------
-    // MEET PING
-    // -----------------------------
-    if (url.pathname === "/meet/ping") {
-      return Response.json({
-        meet: "online",
-        ws: "ready",
-        ts: Date.now()
-      })
-    }
-
-    // -----------------------------
-    // 404
-    // -----------------------------
-    return new Response("CONSIA ROUTE NOT FOUND", { status: 404 })
   }
 }
