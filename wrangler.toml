@@ -1,17 +1,13 @@
 name = "consia-api"
 main = "worker.js"
-compatibility_date = "2026-02-01"
+compatibility_date = "2026-02-21"
 
-# =========================
-# ENV
-# =========================
+# Si usas workers.dev y dominio custom juntos, lo manejás desde Cloudflare dashboard.
+workers_dev = true
 
 [vars]
 ENVIRONMENT = "prod"
-
-# =========================
-# DURABLE OBJECT
-# =========================
+OPENAI_MODEL = "gpt-4.1-mini"
 
 [durable_objects]
 bindings = [
@@ -19,5 +15,6 @@ bindings = [
 ]
 
 [[migrations]]
-tag = "v1"
+# IMPORTANTE: tag nuevo y único (no repetir uno viejo)
+tag = "v2026_02_21_consia_state_recreate"
 new_sqlite_classes = ["ConsiaState"]
