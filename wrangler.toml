@@ -1,12 +1,17 @@
 name = "consia-api"
 main = "worker.js"
-compatibility_date = "2026-01-01"
+compatibility_date = "2026-02-22"
+
+[vars]
+ENV = "prod"
+OPENAI_MODEL = "gpt-4.1-mini"
 
 [durable_objects]
 bindings = [
-  { name = "MEETING_DO", class_name = "MeetingRoom" }
+  { name = "CONSIA_STATE", class_name = "ConsiaState" },
+  { name = "MEETING_DO", class_name = "ConsiaState" }
 ]
 
 [[migrations]]
-tag = "v1"
-new_classes = ["MeetingRoom"]
+tag = "v2026_02_21_consia_state_recreate"
+new_sqlite_classes = ["ConsiaState"]
