@@ -1,3 +1,28 @@
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+
+    if (url.pathname === "/health") {
+      return new Response("CONSIA API OK");
+    }
+
+    if (url.pathname.startsWith("/realtime/")) {
+      const roomId = url.pathname.split("/")[2] || "global";
+      const id = env.MEETING_DO.idFromName(roomId);
+      const stub = env.MEETING_DO.get(id);
+      return stub.fetch(request);
+    }
+
+    return new Response("CONSIA CORE ACTIVE");
+  }
+};
+
+export class ConsiaState {
+  constructor(state, env) {
+    this.state = state;
+  }
+}
+
 export class MeetingRoom {
   constructor(state, env) {
     this.state = state;
