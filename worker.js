@@ -1,257 +1,179 @@
 /**
- * CONSIA API Worker — Top 1 Pack
- * - CORS hardened
- * - Durable Objects bindings compatible
- * - KV namespaces compatible
- * - Adds: /voice.html static UI route
+ * CONSIA API Worker (single-file)
+ * - Serves / (health), /voice.html (mic UI)
+ * - POST /ask  { message } -> model response
+ * - POST /voice (multipart form-data: file=<audio>) -> transcribe -> /ask -> JSON
  *
- * NOTE: Keep secrets in Cloudflare "Secrets" (never in code):
- * - OPENAI_API_KEY
+ * REQUIRED SECRETS (Cloudflare Workers > Settings > Variables):
+ * - OPENAI_API_KEY   (secret)
+ *
+ * OPTIONAL VARS:
+ * - CHAT_MODEL                 (default: "gpt-4o-mini")
+ * - TRANSCRIBE_MODEL           (default: "gpt-4o-mini-transcribe")
+ * - CONSIA_SYSTEM_PROMPT       (default: CONSIA-safe system)
+ * - CORS_ALLOW_ORIGIN          (default: "*")
  */
 
-const JSON_HEADERS = { "content-type": "application/json; charset=utf-8" };
+export default {
+  async fetch(request, env, ctx) {
+    const url = new URL(request.url);
+    const method = request.method.toUpperCase();
 
-const CORS = {
-  "access-control-allow-origin": "*",
-  "access-control-allow-methods": "GET,POST,OPTIONS",
-  "access-control-allow-headers": "content-type, authorization, x-consia-device, x-consia-session",
-  "access-control-allow-credentials": "true",
+    // --- CORS preflight ---
+    if (method === "OPTIONS") {
+      return withCors(new Response(null, { status: 204 }), env);
+    }
+
+    // --- ROUTES ---
+    if (method === "GET" && (url.pathname === "/" || url.pathname === "/health")) {
+      return withCors(
+        new Response("CONSIA CORE ACTIVE", {
+          headers: { "content-type": "text/plain; charset=utf-8" },
+        }),
+        env
+      );
+    }
+
+    if (method === "GET" && url.pathname === "/voice.html") {
+      return withCors(
+        new Response(VOICE_HTML, {
+          headers: {
+            "content-type": "text/html; charset=utf-8",
+            "cache-control": "no-store",
+          },
+        }),
+        env
+      );
+    }
+
+    if (method === "POST" && url.pathname === "/ask") {
+      const body = await safeJson(request);
+      const message = (body?.message ?? "").toString().trim();
+      if (!message) return withCors(json({ error: "Missing 'message'" }, 400), env);
+
+      try {
+        const reply = await consiaAsk(message, env);
+        return withCors(json({ ok: true, message, reply }), env);
+      } catch (e) {
+        return withCors(json({ ok: false, error: String(e?.message || e) }, 500), env);
+      }
+    }
+
+    if (method === "POST" && url.pathname === "/voice") {
+      // Expect multipart: file=<audio blob>
+      const ct = request.headers.get("content-type") || "";
+      if (!ct.includes("multipart/form-data")) {
+        return withCors(json({ error: "Expected multipart/form-data with file=<audio>" }, 400), env);
+      }
+
+      try {
+        const form = await request.formData();
+        const file = form.get("file");
+        if (!file || typeof file === "string") {
+          return withCors(json({ error: "Missing audio file field 'file'" }, 400), env);
+        }
+
+        const transcript = await transcribeAudio(file, env);
+        const reply = await consiaAsk(transcript, env);
+
+        return withCors(json({ ok: true, transcript, reply }), env);
+      } catch (e) {
+        return withCors(json({ ok: false, error: String(e?.message || e) }, 500), env);
+      }
+    }
+
+    return withCors(
+      new Response("Not Found", { status: 404, headers: { "content-type": "text/plain; charset=utf-8" } }),
+      env
+    );
+  },
 };
 
-const VOICE_HTML = `<!doctype html>
-<html lang="es">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>CONSIA VOICE — Realtime</title>
-  <style>
-    :root { color-scheme: dark; }
-    body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; background:#0b0b0f; color:#fff; }
-    .wrap { max-width: 980px; margin: 0 auto; padding: 18px; }
-    .card { background: #12121a; border:1px solid #242436; border-radius: 14px; padding: 14px; }
-    .row { display:flex; gap: 10px; flex-wrap: wrap; align-items:center; }
-    button { background:#2a2aff; border:none; color:#fff; padding:10px 14px; border-radius: 10px; font-weight: 700; cursor:pointer; }
-    button.secondary { background:#23233a; }
-    input, select, textarea { background:#0f0f18; border:1px solid #242436; color:#fff; padding:10px 12px; border-radius: 10px; width: 100%; }
-    textarea { min-height: 120px; }
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 12px; white-space: pre-wrap; }
-    .pill { display:inline-flex; padding:6px 10px; border:1px solid #242436; border-radius: 999px; background:#0f0f18; gap:8px; align-items:center; }
-    .ok { color:#4ef3a4; }
-    .bad { color:#ff6b6b; }
-    .tiny { opacity: .85; font-size: 12px; }
-    .grid { display:grid; grid-template-columns: 1fr; gap: 10px; }
-    @media (min-width: 860px) { .grid { grid-template-columns: 1fr 1fr; } }
-  </style>
-</head>
-<body>
-  <div class="wrap">
-    <div class="row" style="justify-content:space-between; margin-bottom: 12px;">
-      <div class="pill"><b>CONSIA VOICE</b> <span class="tiny">Realtime • Mic • Avatar Sync</span></div>
-      <div class="pill"><span id="statusDot" class="bad">●</span> <span id="statusText">Disconnected</span></div>
-    </div>
+// -------------------- CORE: CONSIA ASK --------------------
+async function consiaAsk(userMessage, env) {
+  const apiKey = env.OPENAI_API_KEY;
+  if (!apiKey) throw new Error("Missing OPENAI_API_KEY (secret) in Worker variables.");
 
-    <div class="grid">
-      <div class="card">
-        <div class="row">
-          <button id="btnToken">1) Get Token</button>
-          <button id="btnConnect" class="secondary">2) Connect WS</button>
-          <button id="btnStart" class="secondary">3) Start Mic</button>
-          <button id="btnStop" class="secondary">Stop</button>
-        </div>
+  const model = env.CHAT_MODEL || "gpt-4o-mini";
+  const system =
+    env.CONSIA_SYSTEM_PROMPT ||
+    [
+      "You are CONSIA. Be concise, execution-first, and safety-first.",
+      "If a request is ambiguous, make a best-effort assumption and proceed.",
+      "Do not reveal secrets. Do not request sensitive personal data.",
+    ].join(" ");
 
-        <div style="margin-top:10px;">
-          <div class="tiny">Model</div>
-          <input id="model" value="gpt-4o-realtime-preview" />
-        </div>
-
-        <div style="margin-top:10px;">
-          <div class="tiny">Console</div>
-          <div id="log" class="mono" style="margin-top:8px; background:#0f0f18; border:1px solid #242436; border-radius:12px; padding:10px; height: 240px; overflow:auto;"></div>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="tiny">Text Test</div>
-        <textarea id="txt" placeholder="Escribí algo para testear que el realtime está vivo..."></textarea>
-        <div class="row" style="margin-top:10px;">
-          <button id="btnSend">Send Text Event</button>
-          <button id="btnPing" class="secondary">Ping CONSIA</button>
-        </div>
-        <div class="tiny" style="margin-top:10px;">
-          Tip: si el mic no funciona, primero permití micrófono en Safari y recargá.
-        </div>
-      </div>
-    </div>
-  </div>
-
-<script>
-  const API_BASE = location.origin; // https://api.consia.world
-  const logEl = document.getElementById('log');
-  const statusDot = document.getElementById('statusDot');
-  const statusText = document.getElementById('statusText');
-
-  let clientSecret = null;
-  let ws = null;
-  let stream = null;
-  let recorder = null;
-
-  function log(...a){
-    const s = a.map(x => (typeof x === 'string' ? x : JSON.stringify(x, null, 2))).join(' ');
-    logEl.textContent += s + "\\n";
-    logEl.scrollTop = logEl.scrollHeight;
-  }
-
-  function setStatus(ok, text){
-    statusDot.className = ok ? 'ok' : 'bad';
-    statusText.textContent = text;
-  }
-
-  async function getToken(){
-    const model = document.getElementById('model').value.trim();
-    const res = await fetch(API_BASE + "/voice/token", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ model })
-    });
-    const data = await res.json();
-    if(!res.ok){ throw new Error(data?.error || "token_error"); }
-    clientSecret = data.client_secret?.value || data.client_secret || data.value || null;
-    log("TOKEN OK:", data);
-    return clientSecret;
-  }
-
-  function openWS(){
-    if(!clientSecret) throw new Error("no_token");
-
-    const model = document.getElementById('model').value.trim();
-    const url = "wss://api.openai.com/v1/realtime?model=" + encodeURIComponent(model);
-
-    ws = new WebSocket(url, [
-      // OpenAI Realtime uses subprotocol auth per docs:
-      // "openai-insecure-api-key.<EPHEMERAL_KEY>"
-      "realtime",
-      "openai-insecure-api-key." + clientSecret
-    ]);
-
-    ws.onopen = () => {
-      setStatus(true, "Connected");
-      log("WS OPEN:", url);
-
-      // minimal session update
-      ws.send(JSON.stringify({
-        type: "session.update",
-        session: {
-          instructions: "You are CONSIA VOICE. Be concise, helpful, and safe.",
-          modalities: ["text","audio"],
-        }
-      }));
-    };
-
-    ws.onmessage = (ev) => {
-      try { log("WS MSG:", JSON.parse(ev.data)); }
-      catch { log("WS MSG:", ev.data); }
-    };
-
-    ws.onerror = (e) => { log("WS ERROR", e); };
-    ws.onclose = () => { setStatus(false, "Disconnected"); log("WS CLOSED"); ws = null; };
-  }
-
-  async function startMic(){
-    if(!ws) throw new Error("ws_not_connected");
-
-    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    recorder = new MediaRecorder(stream, { mimeType: "audio/webm;codecs=opus" });
-
-    recorder.ondataavailable = async (ev) => {
-      if(!ws || ws.readyState !== 1) return;
-      if(!ev.data || ev.data.size === 0) return;
-
-      // Send as base64 chunk event (placeholder). Real-time audio format requirements vary.
-      const buf = await ev.data.arrayBuffer();
-      const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
-
-      ws.send(JSON.stringify({
-        type: "input_audio_buffer.append",
-        audio: b64
-      }));
-    };
-
-    recorder.start(250);
-    log("MIC STARTED (MediaRecorder opus/webm chunks)");
-  }
-
-  function stopAll(){
-    try { recorder && recorder.state !== "inactive" && recorder.stop(); } catch {}
-    recorder = null;
-    try { stream && stream.getTracks().forEach(t => t.stop()); } catch {}
-    stream = null;
-    try { ws && ws.close(); } catch {}
-    ws = null;
-    setStatus(false, "Disconnected");
-    log("STOPPED");
-  }
-
-  document.getElementById('btnToken').onclick = async () => {
-    try { await getToken(); }
-    catch(e){ log("TOKEN FAIL:", String(e)); }
+  const payload = {
+    model,
+    input: [
+      { role: "system", content: system },
+      { role: "user", content: userMessage },
+    ],
   };
 
-  document.getElementById('btnConnect').onclick = () => {
-    try { openWS(); }
-    catch(e){ log("CONNECT FAIL:", String(e)); }
-  };
+  const res = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
 
-  document.getElementById('btnStart').onclick = async () => {
-    try { await startMic(); }
-    catch(e){ log("MIC FAIL:", String(e)); }
-  };
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(`OpenAI error (${res.status}): ${JSON.stringify(data)}`);
+  }
 
-  document.getElementById('btnStop').onclick = stopAll;
+  // Extract text in a resilient way
+  const text =
+    data?.output_text ||
+    data?.output?.[0]?.content?.map((c) => c?.text).filter(Boolean).join("") ||
+    "";
 
-  document.getElementById('btnSend').onclick = () => {
-    try {
-      if(!ws) throw new Error("ws_not_connected");
-      const text = document.getElementById('txt').value.trim();
-      ws.send(JSON.stringify({ type: "conversation.item.create", item: { type: "message", role: "user", content: [{ type:"input_text", text }] } }));
-      ws.send(JSON.stringify({ type: "response.create" }));
-      log("SENT TEXT:", text);
-    } catch(e){ log("SEND FAIL:", String(e)); }
-  };
+  return text || "(no text)";
+}
 
-  document.getElementById('btnPing').onclick = async () => {
-    const res = await fetch(API_BASE + "/ping");
-    const t = await res.text();
-    log("PING:", t);
-  };
+// -------------------- AUDIO: TRANSCRIBE --------------------
+async function transcribeAudio(file, env) {
+  const apiKey = env.OPENAI_API_KEY;
+  if (!apiKey) throw new Error("Missing OPENAI_API_KEY (secret) in Worker variables.");
 
-  setStatus(false, "Disconnected");
-  log("Ready. Step 1: Get Token. Step 2: Connect. Step 3: Start Mic.");
-</script>
-</body>
-</html>`;
+  const model = env.TRANSCRIBE_MODEL || "gpt-4o-mini-transcribe";
 
-function json(data, status = 200, extraHeaders = {}) {
-  return new Response(JSON.stringify(data), {
+  // Build multipart form
+  const form = new FormData();
+  form.append("model", model);
+
+  // Keep original name/type if available
+  const filename = file.name || "audio.webm";
+  const typedFile = file instanceof File ? file : new File([file], filename, { type: file.type || "audio/webm" });
+  form.append("file", typedFile, filename);
+
+  const res = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}` },
+    body: form,
+  });
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(`Transcription error (${res.status}): ${JSON.stringify(data)}`);
+  }
+
+  const text = (data?.text ?? "").toString().trim();
+  return text || "(empty transcript)";
+}
+
+// -------------------- UTILS --------------------
+function json(obj, status = 200) {
+  return new Response(JSON.stringify(obj, null, 2), {
     status,
-    headers: { ...JSON_HEADERS, ...CORS, ...extraHeaders },
+    headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" },
   });
 }
 
-function text(body, status = 200, extraHeaders = {}) {
-  return new Response(body, {
-    status,
-    headers: { "content-type": "text/plain; charset=utf-8", ...CORS, ...extraHeaders },
-  });
-}
-
-async function withCorsPreflight(request) {
-  if (request.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers: { ...CORS } });
-  }
-  return null;
-}
-
-async function readJson(request) {
+async function safeJson(request) {
   try {
     return await request.json();
   } catch {
@@ -259,113 +181,139 @@ async function readJson(request) {
   }
 }
 
-/**
- * OpenAI Realtime: Create ephemeral client secret.
- * Source: OpenAI docs (realtime client_secrets).
- */
-async function openaiCreateRealtimeClientSecret(env, model) {
-  if (!env.OPENAI_API_KEY) {
-    throw new Error("missing_OPENAI_API_KEY");
-  }
-
-  const res = await fetch("https://api.openai.com/v1/realtime/client_secrets", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "authorization": `Bearer ${env.OPENAI_API_KEY}`,
-    },
-    body: JSON.stringify({
-      // Keep flexible: some accounts accept model here; otherwise default server-side
-      model: model || "gpt-4o-realtime-preview",
-    }),
-  });
-
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    const msg = data?.error?.message || data?.error || "openai_error";
-    throw new Error(msg);
-  }
-  return data; // includes client_secret
+function withCors(response, env) {
+  const origin = env.CORS_ALLOW_ORIGIN || "*";
+  const headers = new Headers(response.headers);
+  headers.set("access-control-allow-origin", origin);
+  headers.set("access-control-allow-methods", "GET,POST,OPTIONS");
+  headers.set("access-control-allow-headers", "content-type, authorization");
+  headers.set("access-control-max-age", "86400");
+  // NOTE: do NOT set allow-credentials unless you set a specific origin (not "*")
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
-export default {
-  async fetch(request, env, ctx) {
-    const pre = await withCorsPreflight(request);
-    if (pre) return pre;
+// -------------------- STATIC: VOICE UI --------------------
+const VOICE_HTML = `<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CONSIA Voice</title>
+  <style>
+    body{font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial; margin:24px; color:#111;}
+    .row{display:flex; gap:12px; flex-wrap:wrap; align-items:center;}
+    button{padding:12px 14px; border:1px solid #ddd; border-radius:10px; background:#fff; font-weight:600;}
+    button:disabled{opacity:.5}
+    textarea{width:100%; min-height:88px; padding:12px; border-radius:10px; border:1px solid #ddd;}
+    pre{white-space:pre-wrap; background:#fafafa; border:1px solid #eee; padding:12px; border-radius:10px;}
+    .muted{color:#666; font-size:13px}
+  </style>
+</head>
+<body>
+  <h2>CONSIA Voice</h2>
+  <p class="muted">Grabá y enviá. Endpoint: <b>/voice</b> (transcribe + respuesta).</p>
 
-    const url = new URL(request.url);
-    const path = url.pathname;
+  <div class="row">
+    <button id="btnStart">🎙️ Grabar</button>
+    <button id="btnStop" disabled>⏹️ Stop</button>
+    <button id="btnSend" disabled>🚀 Enviar</button>
+  </div>
 
-    // Static UI
-    if (request.method === 'GET' && (path === '/voice.html' || path === '/voice')) {
-      return new Response(VOICE_HTML, { headers: { 'content-type': 'text/html; charset=utf-8', ...CORS } });
+  <h3>Texto (opcional)</h3>
+  <textarea id="txt" placeholder="Escribí acá o usá el micrófono..."></textarea>
+  <div class="row" style="margin-top:10px">
+    <button id="btnAsk">🧠 Preguntar</button>
+  </div>
+
+  <h3>Salida</h3>
+  <pre id="out">Listo.</pre>
+
+<script>
+(() => {
+  const out = document.getElementById("out");
+  const btnStart = document.getElementById("btnStart");
+  const btnStop = document.getElementById("btnStop");
+  const btnSend = document.getElementById("btnSend");
+  const btnAsk = document.getElementById("btnAsk");
+  const txt = document.getElementById("txt");
+
+  let mediaRecorder = null;
+  let chunks = [];
+  let blob = null;
+
+  const log = (obj) => out.textContent = (typeof obj === "string") ? obj : JSON.stringify(obj, null, 2);
+
+  btnStart.onclick = async () => {
+    try {
+      blob = null;
+      chunks = [];
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+      mediaRecorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+      mediaRecorder.onstop = () => {
+        blob = new Blob(chunks, { type: "audio/webm" });
+        btnSend.disabled = false;
+        log({ ok: true, status: "recorded", bytes: blob.size });
+      };
+      mediaRecorder.start();
+      btnStart.disabled = true;
+      btnStop.disabled = false;
+      btnSend.disabled = true;
+      log("Grabando...");
+    } catch (e) {
+      log({ ok: false, error: String(e) });
     }
+  };
 
-    // Health / root
-    if (path === "/" && request.method === "GET") {
-      return text("CONSIA CORE ACTIVE");
-    }
-
-    // Basic ping
-    if (path === "/ping") {
-      return json({ ok: true, service: "consia-api", ts: Date.now() });
-    }
-
-    // Voice token (ephemeral)
-    if (path === "/voice/token" && request.method === "POST") {
-      const body = await readJson(request);
-      const model = body?.model || "gpt-4o-realtime-preview";
-      try {
-        const data = await openaiCreateRealtimeClientSecret(env, model);
-        return json({ ok: true, ...data });
-      } catch (e) {
-        return json({ ok: false, error: String(e.message || e) }, 500);
+  btnStop.onclick = () => {
+    try {
+      if (mediaRecorder && mediaRecorder.state !== "inactive") {
+        mediaRecorder.stop();
+        mediaRecorder.stream.getTracks().forEach(t => t.stop());
       }
+      btnStart.disabled = false;
+      btnStop.disabled = true;
+    } catch (e) {
+      log({ ok: false, error: String(e) });
     }
+  };
 
-    // Voice session (alias)
-    if (path === "/voice/session" && request.method === "POST") {
-      const body = await readJson(request);
-      const model = body?.model || "gpt-4o-realtime-preview";
-      try {
-        const data = await openaiCreateRealtimeClientSecret(env, model);
-        return json({
-          ok: true,
-          model,
-          client_secret: data.client_secret,
-          ws_url: `wss://api.openai.com/v1/realtime?model=${encodeURIComponent(model)}`,
-        });
-      } catch (e) {
-        return json({ ok: false, error: String(e.message || e) }, 500);
-      }
+  btnSend.onclick = async () => {
+    try {
+      if (!blob) return log({ ok:false, error:"No hay audio" });
+      btnSend.disabled = true;
+      log("Enviando audio...");
+      const fd = new FormData();
+      fd.append("file", blob, "audio.webm");
+
+      const res = await fetch("/voice", { method:"POST", body: fd });
+      const data = await res.json();
+      log(data);
+      if (data?.transcript) txt.value = data.transcript;
+    } catch (e) {
+      log({ ok: false, error: String(e) });
+    } finally {
+      btnSend.disabled = false;
     }
+  };
 
-    // Minimal Marketplace (foundation)
-    if (path === "/market/products" && request.method === "GET") {
-      // Placeholder catalog (best-seller style) — later we move to MARKET_KV
-      const products = [
-        { id: "consia-airbuds", brand: "CONSIA", name: "AirBuds Pro Max", category: "Audio", price_usd: 79.99, image: "/market/img/consia-airbuds.png" },
-        { id: "consia-smartplug", brand: "CONSIA", name: "SmartPlug Ultra", category: "Smart Home", price_usd: 19.99, image: "/market/img/consia-smartplug.png" },
-        { id: "consia-cam", brand: "CONSIA", name: "SecureCam 4K", category: "Security", price_usd: 59.99, image: "/market/img/consia-cam.png" },
-        { id: "consia-bottle", brand: "CONSIA", name: "HydraBottle Steel", category: "Lifestyle", price_usd: 24.99, image: "/market/img/consia-bottle.png" },
-      ];
-      return json({ ok: true, products });
-    }
-
-    if (path.startsWith("/market/products/") && request.method === "GET") {
-      const id = path.split("/").pop();
-      return json({
-        ok: true,
-        product: {
-          id,
-          brand: "CONSIA",
-          name: "Prototype Product",
-          status: "prototype",
-          notes: "Next: move catalog to MARKET_KV + suppliers directory + checkout rails.",
-        },
+  btnAsk.onclick = async () => {
+    try {
+      const message = (txt.value || "").trim();
+      if (!message) return log({ ok:false, error:"Escribí un mensaje" });
+      log("Consultando...");
+      const res = await fetch("/ask", {
+        method:"POST",
+        headers:{ "content-type":"application/json" },
+        body: JSON.stringify({ message })
       });
+      const data = await res.json();
+      log(data);
+    } catch (e) {
+      log({ ok:false, error: String(e) });
     }
-
-    return json({ ok: false, error: "Route not found", path }, 404);
-  },
-};
+  };
+})();
+</script>
+</body>
+</html>`;
