@@ -1,13 +1,12 @@
 name = "consia-api"
 main = "worker.js"
-compatibility_date = "2026-02-21"
+compatibility_date = "2026-01-01"
 
 [durable_objects]
 bindings = [
-  { name = "CONSIA_STATE", class_name = "ConsiaState" },
   { name = "MEETING_DO", class_name = "MeetingRoom" }
 ]
 
 [[migrations]]
-tag = "v2026_02_22_realtime"
-new_sqlite_classes = ["MeetingRoom"]
+tag = "v1"
+new_classes = ["MeetingRoom"]
