@@ -1,47 +1,14 @@
 name = "consia-api"
 main = "worker.js"
-compatibility_date = "2026-01-21"
-workers_dev = true
+compatibility_date = "2026-02-21"
 
-# Si ya tenés route/dominio en Cloudflare Dashboard, dejalo igual o ajustalo acá:
-routes = [
-  { pattern = "api.consia.world/*", zone_name = "consia.world" }
+[durable_objects]
+bindings = [
+  { name = "CONSIA_STATE", class_name = "ConsiaState" },
+  { name = "MEETING_DO", class_name = "MeetingRoom" }
 ]
 
-[vars]
-ENV = "prod"
-OPENAI_MODEL = "gpt-4.1-mini"
-
-# Durable Object: CLASE + BINDING
-[[durable_objects.bindings]]
-name = "CONSIA_STATE"
-class_name = "ConsiaState"
-
-# MIGRATIONS: esto es lo que “crea” el DO y hace que aparezca en el dashboard
 [[migrations]]
-tag = "v1"
-new_classes = ["ConsiaState"]
+tag = "v2026_02_22_meeting_room"
 
-# KV (opcional): si ya los tenés creados, mantené estos nombres de binding
-# y seteá los ids reales con wrangler (o dejalos en dashboard).
-# Si no querés KV por ahora, podés comentar todo el bloque kv_namespaces.
-
-[[kv_namespaces]]
-binding = "AUDIT_KV"
-id = "REEMPLAZAR_AUDIT_ID"
-
-[[kv_namespaces]]
-binding = "VAULT_KV"
-id = "REEMPLAZAR_VAULT_ID"
-
-[[kv_namespaces]]
-binding = "SESSIONS_KV"
-id = "REEMPLAZAR_SESSIONS_ID"
-
-[[kv_namespaces]]
-binding = "PRESENCE_KV"
-id = "REEMPLAZAR_PRESENCE_ID"
-
-[[kv_namespaces]]
-binding = "GLOBAL_STATE_KV"
-id = "REEMPLAZAR_GLOBAL_STATE_ID"
+new_sqlite_classes = ["MeetingRoom"]
