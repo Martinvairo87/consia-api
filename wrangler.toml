@@ -9,6 +9,5 @@ bindings = [
 ]
 
 [[migrations]]
-tag = "v2026_02_22_meeting_room"
-
+tag = "v2026_02_22_realtime"
 new_sqlite_classes = ["MeetingRoom"]
