@@ -2,33 +2,51 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
-    // CORS
-    if (request.method === "OPTIONS") {
+    // HEALTH
+    if (url.pathname === "/health") {
+      return new Response("CONSIA VOICE OK");
+    }
+
+    // REALTIME ROOM WS
+    if (url.pathname.startsWith("/realtime/")) {
+      if (request.headers.get("Upgrade") !== "websocket") {
+        return new Response("Expected WebSocket", { status: 400 });
+      }
+
+      const pair = new WebSocketPair();
+      const [client, server] = Object.values(pair);
+
+      const roomName = url.pathname.split("/")[2] || "global";
+      const id = env.MEETING_DO.idFromName(roomName);
+      const stub = env.MEETING_DO.get(id);
+
+      ctx.waitUntil(stub.fetch(request, { webSocket: server }));
+
       return new Response(null, {
-        headers: cors()
+        status: 101,
+        webSocket: client
       });
     }
 
-    // HEALTH
-    if (url.pathname === "/health") {
-      return json({ ok: true, realtime: true });
+    // VOICE TOKEN (Realtime AI session)
+    if (url.pathname === "/voice/token") {
+      const token = crypto.randomUUID();
+
+      return Response.json({
+        ok: true,
+        token,
+        voice: "alloy",
+        realtime: true
+      });
     }
 
-    // CREATE / JOIN ROOM
-    if (url.pathname.startsWith("/realtime/")) {
-      const room = url.pathname.split("/")[2] || "global";
-
-      const id = env.MEETING_DO.idFromName(room);
-      const stub = env.MEETING_DO.get(id);
-
-      return stub.fetch(request);
-    }
-
-    return json({ ok: true, route: "root" });
+    return new Response("CONSIA API OK");
   }
 };
 
-// ================= ROOM =================
+//////////////////////////////////////////////////////////////////
+// DURABLE OBJECT — ROOMS + PRESENCE + AUDIO STREAM
+//////////////////////////////////////////////////////////////////
 
 export class MeetingRoom {
   constructor(state, env) {
@@ -37,24 +55,23 @@ export class MeetingRoom {
   }
 
   async fetch(request) {
-    if (request.headers.get("Upgrade") !== "websocket") {
-      return new Response("Expected websocket", { status: 400 });
-    }
-
     const pair = new WebSocketPair();
-    const client = pair[0];
-    const server = pair[1];
-
-    const id = crypto.randomUUID();
-
-    this.sessions.set(id, server);
+    const [client, server] = Object.values(pair);
 
     server.accept();
 
+    const id = crypto.randomUUID();
+    this.sessions.set(id, server);
+
+    server.send(JSON.stringify({
+      type: "system",
+      text: "Connected to CONSIA Voice Room"
+    }));
+
     server.addEventListener("message", evt => {
-      for (const [sid, socket] of this.sessions) {
-        if (sid !== id) {
-          socket.send(evt.data);
+      for (const [sid, sock] of this.sessions) {
+        if (sock !== server) {
+          sock.send(evt.data);
         }
       }
     });
@@ -68,23 +85,4 @@ export class MeetingRoom {
       webSocket: client
     });
   }
-}
-
-// ================= UTILS =================
-
-function json(data) {
-  return new Response(JSON.stringify(data), {
-    headers: {
-      "content-type": "application/json",
-      ...cors()
-    }
-  });
-}
-
-function cors() {
-  return {
-    "access-control-allow-origin": "*",
-    "access-control-allow-methods": "GET,POST,OPTIONS",
-    "access-control-allow-headers": "*"
-  };
 }
