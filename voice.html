@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1.0" />
+<title>CONSIA • Voice Realtime</title>
+
+<style>
+  body {
+    margin:0;
+    background:#05070c;
+    color:white;
+    font-family:Arial,Helvetica,sans-serif;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    height:100vh;
+  }
+
+  #avatar {
+    width:240px;
+    height:240px;
+    border-radius:50%;
+    background:url("https://i.imgur.com/8Km9tLL.png") center/cover no-repeat;
+    box-shadow:0 0 80px rgba(0,255,255,.35);
+    animation:idle 4s infinite ease-in-out;
+  }
+
+  @keyframes idle {
+    0% {transform:scale(1)}
+    50% {transform:scale(1.05)}
+    100% {transform:scale(1)}
+  }
+
+  .talking {
+    animation:talk 0.6s infinite;
+  }
+
+  @keyframes talk {
+    0% {transform:scale(1)}
+    50% {transform:scale(1.12)}
+    100% {transform:scale(1)}
+  }
+
+  button {
+    margin-top:40px;
+    padding:16px 28px;
+    border:none;
+    border-radius:14px;
+    background:#0ff;
+    color:black;
+    font-weight:bold;
+    font-size:16px;
+    cursor:pointer;
+    box-shadow:0 0 30px rgba(0,255,255,.6);
+  }
+
+  #log {
+    margin-top:25px;
+    font-size:13px;
+    opacity:.7;
+  }
+</style>
+</head>
+
+<body>
+
+<div id="avatar"></div>
+
+<button onclick="startVoice()">START VOICE</button>
+
+<div id="log">CONSIA Voice Standby</div>
+
+<script>
+let ws;
+let mediaStream;
+let audioContext;
+let processor;
+
+async function startVoice(){
+
+  log("Connecting WS...");
+
+  ws = new WebSocket("wss://api.consia.world/ws?mode=voice");
+
+  ws.onopen = async () => {
+    log("WS Connected");
+    await startMic();
+  };
+
+  ws.onmessage = async (msg) => {
+
+    const data = JSON.parse(msg.data);
+
+    if(data.type === "ai_audio"){
+      playAudio(data.audio);
+    }
+
+    if(data.type === "avatar_talk"){
+      avatarTalk(true);
+      setTimeout(()=>avatarTalk(false),1200);
+    }
+  };
+}
+
+async function startMic(){
+
+  mediaStream = await navigator.mediaDevices.getUserMedia({audio:true});
+
+  audioContext = new AudioContext({sampleRate:16000});
+  const source = audioContext.createMediaStreamSource(mediaStream);
+
+  processor = audioContext.createScriptProcessor(4096,1,1);
+
+  source.connect(processor);
+  processor.connect(audioContext.destination);
+
+  processor.onaudioprocess = e => {
+
+    const pcm = e.inputBuffer.getChannelData(0);
+    const int16 = convertFloat32ToInt16(pcm);
+
+    if(ws.readyState === 1){
+      ws.send(int16);
+    }
+  };
+
+  log("Mic Streaming Live");
+}
+
+function convertFloat32ToInt16(buffer){
+  let l = buffer.length;
+  const buf = new Int16Array(l);
+  while(l--){
+    buf[l] = Math.min(1,buffer[l]) * 0x7fff;
+  }
+  return buf.buffer;
+}
+
+function playAudio(base64){
+
+  const audio = new Audio("data:audio/mp3;base64,"+base64);
+  audio.play();
+}
+
+function avatarTalk(state){
+  const av = document.getElementById("avatar");
+  if(state) av.classList.add("talking");
+  else av.classList.remove("talking");
+}
+
+function log(t){
+  document.getElementById("log").innerText = t;
+}
+</script>
+
+</body>
+</html>
