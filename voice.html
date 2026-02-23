@@ -1,159 +1,207 @@
-<!DOCTYPE html>
-<html lang="en">
+<!doctype html>
+<html lang="es">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1.0" />
-<title>CONSIA • Voice Realtime</title>
-
-<style>
-  body {
-    margin:0;
-    background:#05070c;
-    color:white;
-    font-family:Arial,Helvetica,sans-serif;
-    display:flex;
-    flex-direction:column;
-    align-items:center;
-    justify-content:center;
-    height:100vh;
-  }
-
-  #avatar {
-    width:240px;
-    height:240px;
-    border-radius:50%;
-    background:url("https://i.imgur.com/8Km9tLL.png") center/cover no-repeat;
-    box-shadow:0 0 80px rgba(0,255,255,.35);
-    animation:idle 4s infinite ease-in-out;
-  }
-
-  @keyframes idle {
-    0% {transform:scale(1)}
-    50% {transform:scale(1.05)}
-    100% {transform:scale(1)}
-  }
-
-  .talking {
-    animation:talk 0.6s infinite;
-  }
-
-  @keyframes talk {
-    0% {transform:scale(1)}
-    50% {transform:scale(1.12)}
-    100% {transform:scale(1)}
-  }
-
-  button {
-    margin-top:40px;
-    padding:16px 28px;
-    border:none;
-    border-radius:14px;
-    background:#0ff;
-    color:black;
-    font-weight:bold;
-    font-size:16px;
-    cursor:pointer;
-    box-shadow:0 0 30px rgba(0,255,255,.6);
-  }
-
-  #log {
-    margin-top:25px;
-    font-size:13px;
-    opacity:.7;
-  }
-</style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>CONSIA VOICE — Realtime</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; background:#0b0b0f; color:#fff; }
+    .wrap { max-width: 980px; margin: 0 auto; padding: 18px; }
+    .card { background: #12121a; border:1px solid #242436; border-radius: 14px; padding: 14px; }
+    .row { display:flex; gap: 10px; flex-wrap: wrap; align-items:center; }
+    button { background:#2a2aff; border:none; color:#fff; padding:10px 14px; border-radius: 10px; font-weight: 700; cursor:pointer; }
+    button.secondary { background:#23233a; }
+    input, select, textarea { background:#0f0f18; border:1px solid #242436; color:#fff; padding:10px 12px; border-radius: 10px; width: 100%; }
+    textarea { min-height: 120px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 12px; white-space: pre-wrap; }
+    .pill { display:inline-flex; padding:6px 10px; border:1px solid #242436; border-radius: 999px; background:#0f0f18; gap:8px; align-items:center; }
+    .ok { color:#4ef3a4; }
+    .bad { color:#ff6b6b; }
+    .tiny { opacity: .85; font-size: 12px; }
+    .grid { display:grid; grid-template-columns: 1fr; gap: 10px; }
+    @media (min-width: 860px) { .grid { grid-template-columns: 1fr 1fr; } }
+  </style>
 </head>
-
 <body>
+  <div class="wrap">
+    <div class="row" style="justify-content:space-between; margin-bottom: 12px;">
+      <div class="pill"><b>CONSIA VOICE</b> <span class="tiny">Realtime • Mic • Avatar Sync</span></div>
+      <div class="pill"><span id="statusDot" class="bad">●</span> <span id="statusText">Disconnected</span></div>
+    </div>
 
-<div id="avatar"></div>
+    <div class="grid">
+      <div class="card">
+        <div class="row">
+          <button id="btnToken">1) Get Token</button>
+          <button id="btnConnect" class="secondary">2) Connect WS</button>
+          <button id="btnStart" class="secondary">3) Start Mic</button>
+          <button id="btnStop" class="secondary">Stop</button>
+        </div>
 
-<button onclick="startVoice()">START VOICE</button>
+        <div style="margin-top:10px;">
+          <div class="tiny">Model</div>
+          <input id="model" value="gpt-4o-realtime-preview" />
+        </div>
 
-<div id="log">CONSIA Voice Standby</div>
+        <div style="margin-top:10px;">
+          <div class="tiny">Console</div>
+          <div id="log" class="mono" style="margin-top:8px; background:#0f0f18; border:1px solid #242436; border-radius:12px; padding:10px; height: 240px; overflow:auto;"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="tiny">Text Test</div>
+        <textarea id="txt" placeholder="Escribí algo para testear que el realtime está vivo..."></textarea>
+        <div class="row" style="margin-top:10px;">
+          <button id="btnSend">Send Text Event</button>
+          <button id="btnPing" class="secondary">Ping CONSIA</button>
+        </div>
+        <div class="tiny" style="margin-top:10px;">
+          Tip: si el mic no funciona, primero permití micrófono en Safari y recargá.
+        </div>
+      </div>
+    </div>
+  </div>
 
 <script>
-let ws;
-let mediaStream;
-let audioContext;
-let processor;
+  const API_BASE = location.origin; // https://api.consia.world
+  const logEl = document.getElementById('log');
+  const statusDot = document.getElementById('statusDot');
+  const statusText = document.getElementById('statusText');
 
-async function startVoice(){
+  let clientSecret = null;
+  let ws = null;
+  let stream = null;
+  let recorder = null;
 
-  log("Connecting WS...");
-
-  ws = new WebSocket("wss://api.consia.world/ws?mode=voice");
-
-  ws.onopen = async () => {
-    log("WS Connected");
-    await startMic();
-  };
-
-  ws.onmessage = async (msg) => {
-
-    const data = JSON.parse(msg.data);
-
-    if(data.type === "ai_audio"){
-      playAudio(data.audio);
-    }
-
-    if(data.type === "avatar_talk"){
-      avatarTalk(true);
-      setTimeout(()=>avatarTalk(false),1200);
-    }
-  };
-}
-
-async function startMic(){
-
-  mediaStream = await navigator.mediaDevices.getUserMedia({audio:true});
-
-  audioContext = new AudioContext({sampleRate:16000});
-  const source = audioContext.createMediaStreamSource(mediaStream);
-
-  processor = audioContext.createScriptProcessor(4096,1,1);
-
-  source.connect(processor);
-  processor.connect(audioContext.destination);
-
-  processor.onaudioprocess = e => {
-
-    const pcm = e.inputBuffer.getChannelData(0);
-    const int16 = convertFloat32ToInt16(pcm);
-
-    if(ws.readyState === 1){
-      ws.send(int16);
-    }
-  };
-
-  log("Mic Streaming Live");
-}
-
-function convertFloat32ToInt16(buffer){
-  let l = buffer.length;
-  const buf = new Int16Array(l);
-  while(l--){
-    buf[l] = Math.min(1,buffer[l]) * 0x7fff;
+  function log(...a){
+    const s = a.map(x => (typeof x === 'string' ? x : JSON.stringify(x, null, 2))).join(' ');
+    logEl.textContent += s + "\\n";
+    logEl.scrollTop = logEl.scrollHeight;
   }
-  return buf.buffer;
-}
 
-function playAudio(base64){
+  function setStatus(ok, text){
+    statusDot.className = ok ? 'ok' : 'bad';
+    statusText.textContent = text;
+  }
 
-  const audio = new Audio("data:audio/mp3;base64,"+base64);
-  audio.play();
-}
+  async function getToken(){
+    const model = document.getElementById('model').value.trim();
+    const res = await fetch(API_BASE + "/voice/token", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model })
+    });
+    const data = await res.json();
+    if(!res.ok){ throw new Error(data?.error || "token_error"); }
+    clientSecret = data.client_secret?.value || data.client_secret || data.value || null;
+    log("TOKEN OK:", data);
+    return clientSecret;
+  }
 
-function avatarTalk(state){
-  const av = document.getElementById("avatar");
-  if(state) av.classList.add("talking");
-  else av.classList.remove("talking");
-}
+  function openWS(){
+    if(!clientSecret) throw new Error("no_token");
 
-function log(t){
-  document.getElementById("log").innerText = t;
-}
+    const model = document.getElementById('model').value.trim();
+    const url = "wss://api.openai.com/v1/realtime?model=" + encodeURIComponent(model);
+
+    ws = new WebSocket(url, [
+      "realtime",
+      "openai-insecure-api-key." + clientSecret
+    ]);
+
+    ws.onopen = () => {
+      setStatus(true, "Connected");
+      log("WS OPEN:", url);
+
+      ws.send(JSON.stringify({
+        type: "session.update",
+        session: {
+          instructions: "You are CONSIA VOICE. Be concise, helpful, and safe.",
+          modalities: ["text","audio"],
+        }
+      }));
+    };
+
+    ws.onmessage = (ev) => {
+      try { log("WS MSG:", JSON.parse(ev.data)); }
+      catch { log("WS MSG:", ev.data); }
+    };
+
+    ws.onerror = (e) => { log("WS ERROR", e); };
+    ws.onclose = () => { setStatus(false, "Disconnected"); log("WS CLOSED"); ws = null; };
+  }
+
+  async function startMic(){
+    if(!ws) throw new Error("ws_not_connected");
+
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    recorder = new MediaRecorder(stream, { mimeType: "audio/webm;codecs=opus" });
+
+    recorder.ondataavailable = async (ev) => {
+      if(!ws || ws.readyState !== 1) return;
+      if(!ev.data || ev.data.size === 0) return;
+
+      const buf = await ev.data.arrayBuffer();
+      const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+
+      ws.send(JSON.stringify({
+        type: "input_audio_buffer.append",
+        audio: b64
+      }));
+    };
+
+    recorder.start(250);
+    log("MIC STARTED (MediaRecorder opus/webm chunks)");
+  }
+
+  function stopAll(){
+    try { recorder && recorder.state !== "inactive" && recorder.stop(); } catch {}
+    recorder = null;
+    try { stream && stream.getTracks().forEach(t => t.stop()); } catch {}
+    stream = null;
+    try { ws && ws.close(); } catch {}
+    ws = null;
+    setStatus(false, "Disconnected");
+    log("STOPPED");
+  }
+
+  document.getElementById('btnToken').onclick = async () => {
+    try { await getToken(); }
+    catch(e){ log("TOKEN FAIL:", String(e)); }
+  };
+
+  document.getElementById('btnConnect').onclick = () => {
+    try { openWS(); }
+    catch(e){ log("CONNECT FAIL:", String(e)); }
+  };
+
+  document.getElementById('btnStart').onclick = async () => {
+    try { await startMic(); }
+    catch(e){ log("MIC FAIL:", String(e)); }
+  };
+
+  document.getElementById('btnStop').onclick = stopAll;
+
+  document.getElementById('btnSend').onclick = () => {
+    try {
+      if(!ws) throw new Error("ws_not_connected");
+      const text = document.getElementById('txt').value.trim();
+      ws.send(JSON.stringify({ type: "conversation.item.create", item: { type: "message", role: "user", content: [{ type:"input_text", text }] } }));
+      ws.send(JSON.stringify({ type: "response.create" }));
+      log("SENT TEXT:", text);
+    } catch(e){ log("SEND FAIL:", String(e)); }
+  };
+
+  document.getElementById('btnPing').onclick = async () => {
+    const res = await fetch(API_BASE + "/ping");
+    const t = await res.text();
+    log("PING:", t);
+  };
+
+  setStatus(false, "Disconnected");
+  log("Ready. Step 1: Get Token. Step 2: Connect. Step 3: Start Mic.");
 </script>
-
 </body>
 </html>
