@@ -1,578 +1,641 @@
-const JSON_HEADERS = { "content-type": "application/json; charset=utf-8" };
+// CONSIA API TOP1 PACK - Worker completo (Marketplace + Realtime + Voice base + Planes + Admin)
+// Pegar completo en worker.js
 
-const PLAN_LIMITS = {
-  FREE: { requests: 300, voiceSessions: 5, ttsChars: 4000, aiCalls: 50, wsRooms: 1 },
-  PRO: { requests: 5000, voiceSessions: 200, ttsChars: 150000, aiCalls: 2000, wsRooms: 10 },
-  BUSINESS: { requests: 25000, voiceSessions: 1500, ttsChars: 1000000, aiCalls: 10000, wsRooms: 100 },
-  ENTERPRISE: { requests: 1000000, voiceSessions: 100000, ttsChars: 10000000, aiCalls: 1000000, wsRooms: 1000 },
+const CORS_HEADERS = {
+  "access-control-allow-origin": "*",
+  "access-control-allow-methods": "GET,POST,OPTIONS",
+  "access-control-allow-headers":
+    "content-type, authorization, x-consia-device, x-consia-session, x-owner-token, x-consia-plan, x-consia-cost",
+  "cache-control": "no-store",
 };
 
-function getCorsHeaders(request, env) {
-  const origin = request.headers.get("Origin") || "";
-  const allowList = (env.CORS_ALLOWLIST || "https://consia.world,https://www.consia.world,http://localhost:3000,http://localhost:5173")
-    .split(",")
-    .map((x) => x.trim())
-    .filter(Boolean);
+const DEFAULT_MODEL = "gpt-4.1-mini";
 
-  let allowOrigin = "*";
-  if (origin && allowList.includes(origin)) allowOrigin = origin;
+const PLAN_LIMITS = {
+  FREE: { daily_requests: 100, daily_voice_sessions: 3, daily_budget_usd: 2 },
+  PRO: { daily_requests: 1000, daily_voice_sessions: 25, daily_budget_usd: 25 },
+  BUSINESS: { daily_requests: 5000, daily_voice_sessions: 200, daily_budget_usd: 150 },
+  ENTERPRISE: { daily_requests: 50000, daily_voice_sessions: 2000, daily_budget_usd: 1000 },
+};
 
-  return {
-    "access-control-allow-origin": allowOrigin,
-    "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
-    "access-control-allow-headers": "content-type, authorization, x-owner-token, x-consia-user, x-consia-plan, x-consia-device, x-consia-session",
-    "access-control-expose-headers": "x-consia-plan,x-consia-remaining,x-consia-soft-lock",
-    "access-control-max-age": "86400",
-    ...(allowOrigin !== "*" ? { "access-control-allow-credentials": "true" } : {}),
-  };
-}
+const DEFAULT_CATALOG = [
+  {
+    id: "consia-flow-earbuds",
+    brand: "CONSIA FLOW",
+    name: "Flow AI Translator Earbuds",
+    category: "Audio / Travel",
+    price_usd: 89.99,
+    cost_target_usd: 28.0,
+    bestseller_score: 92,
+    dropship_ready: true,
+    variants: ["Black", "White", "Sand"],
+    supplier_type: "OEM ODM Audio",
+    image_prompt:
+      "Ultra premium product photography, CONSIA FLOW AI translator earbuds, matte black charging case, futuristic minimal branding, studio light, hyperrealistic ecommerce 8K, white seamless background",
+    description:
+      "Auriculares con traducciÃ³n en vivo, llamadas y modo viaje. SKU ideal para ventas globales.",
+  },
+  {
+    id: "consia-pulse-ring",
+    brand: "CONSIA PULSE",
+    name: "Pulse Sleep & Wellness Ring",
+    category: "Wellness",
+    price_usd: 119.99,
+    cost_target_usd: 34.0,
+    bestseller_score: 90,
+    dropship_ready: true,
+    variants: ["Black", "Titanium"],
+    supplier_type: "Wearables OEM",
+    image_prompt:
+      "Hyperrealistic product render, smart ring wellness tracker, black titanium finish, elegant shadow, premium ecommerce photo, 8K",
+    description:
+      "Anillo wellness con mÃ©tricas de sueÃ±o y energÃ­a. Marca premium con packaging liviano.",
+  },
+  {
+    id: "consia-aura-diffuser",
+    brand: "CONSIA AURA",
+    name: "Aura Smart Aroma Diffuser",
+    category: "Home",
+    price_usd: 69.99,
+    cost_target_usd: 21.0,
+    bestseller_score: 88,
+    dropship_ready: true,
+    variants: ["Obsidian", "Stone"],
+    supplier_type: "Home Electronics OEM",
+    image_prompt:
+      "Luxury smart aroma diffuser product photo, black matte aluminum ring, soft vapor mist, warm ambient light, premium home product, hyperrealistic 8K",
+    description:
+      "Difusor inteligente controlado por app/voz. Gran margen y alto potencial de regalo.",
+  },
+  {
+    id: "consia-vault-tag",
+    brand: "CONSIA VAULT",
+    name: "Vault Smart Luggage Tag",
+    category: "Travel",
+    price_usd: 39.99,
+    cost_target_usd: 9.5,
+    bestseller_score: 87,
+    dropship_ready: true,
+    variants: ["Black", "Orange", "Navy"],
+    supplier_type: "Travel Accessories OEM",
+    image_prompt:
+      "Premium smart luggage tag with e-ink style face, black silicone strap, passport and suitcase composition, travel ecommerce photo, hyperrealistic",
+    description:
+      "Tag inteligente para equipaje con QR y ficha digital. Ideal para travel/airport niche.",
+  },
+  {
+    id: "consia-move-bottle",
+    brand: "CONSIA MOVE",
+    name: "Move Smart Hydration Bottle",
+    category: "Fitness / Lifestyle",
+    price_usd: 49.99,
+    cost_target_usd: 14.0,
+    bestseller_score: 85,
+    dropship_ready: true,
+    variants: ["Black", "Steel", "Green"],
+    supplier_type: "Drinkware OEM",
+    image_prompt:
+      "Modern smart hydration bottle product shot, matte black stainless steel, minimal CONSIA MOVE branding, sporty but premium, hyperrealistic 8K",
+    description:
+      "Botella con recordatorios y sensor de temperatura. Venta global evergreen.",
+  },
+  {
+    id: "consia-home-hub-mini",
+    brand: "CONSIA HOME",
+    name: "Home Hub Mini",
+    category: "Smart Home",
+    price_usd: 129.99,
+    cost_target_usd: 39.0,
+    bestseller_score: 94,
+    dropship_ready: false,
+    variants: ["Black"],
+    supplier_type: "Custom ODM IoT",
+    image_prompt:
+      "Premium smart home hub device, black anodized finish, soft LED ring, modern minimal product photography, 8K hyperreal",
+    description:
+      "Hub para conectar dispositivos del ecosistema CONSIA. Producto core de plataforma.",
+  },
+  {
+    id: "consia-desk-dock",
+    brand: "CONSIA DESK",
+    name: "Desk Dock 7-in-1",
+    category: "Tech Accessories",
+    price_usd: 79.99,
+    cost_target_usd: 22.0,
+    bestseller_score: 89,
+    dropship_ready: true,
+    variants: ["Black", "Graphite"],
+    supplier_type: "USB-C Accessories OEM",
+    image_prompt:
+      "Premium USB-C docking station, sleek black aluminum, desk setup aesthetic, hyperrealistic commercial product photo",
+    description:
+      "Dock USB-C para creators/office. Producto de alta rotaciÃ³n y ticket medio.",
+  },
+  {
+    id: "consia-kids-lamp",
+    brand: "CONSIA KIDS",
+    name: "Kids Calm Light",
+    category: "Kids / Home",
+    price_usd: 59.99,
+    cost_target_usd: 16.0,
+    bestseller_score: 83,
+    dropship_ready: true,
+    variants: ["Moon", "Cloud"],
+    supplier_type: "Lighting OEM",
+    image_prompt:
+      "Premium kids calm light lamp, soft-touch silicone, modern nursery aesthetic, warm ambient glow, hyperrealistic 8K",
+    description:
+      "Luz nocturna inteligente orientada a bienestar y rutinas.",
+  }
+];
 
-function withCors(res, request, env) {
-  const headers = new Headers(res.headers);
-  const cors = getCorsHeaders(request, env);
-  for (const [k, v] of Object.entries(cors)) headers.set(k, v);
-  return new Response(res.body, { status: res.status, headers });
-}
+const SUPPLIER_DIRECTORY = [
+  { name: "Alibaba", type: "B2B Manufacturers", url: "https://www.alibaba.com", use: "OEM/ODM general global sourcing" },
+  { name: "Global Sources", type: "B2B Manufacturers", url: "https://www.globalsources.com", use: "Electronics/hardware suppliers" },
+  { name: "Made-in-China", type: "B2B Manufacturers", url: "https://www.made-in-china.com", use: "Industrial and consumer goods sourcing" },
+  { name: "CJdropshipping", type: "Dropshipping Fulfillment", url: "https://www.cjdropshipping.com", use: "Dropship + sourcing + fulfillment" },
+  { name: "DSers", type: "AliExpress Automation", url: "https://www.dsers.com", use: "AliExpress order routing" },
+  { name: "Zendrop", type: "Dropshipping Fulfillment", url: "https://www.zendrop.com", use: "US-focused dropship flows" },
+  { name: "Spocket", type: "Supplier Marketplace", url: "https://www.spocket.co", use: "US/EU suppliers" },
+  { name: "Printful", type: "Print on Demand", url: "https://www.printful.com", use: "POD brand launch" },
+  { name: "Gelato", type: "Print on Demand", url: "https://www.gelato.com", use: "Localized POD production" },
+  { name: "ShipBob", type: "3PL Fulfillment", url: "https://www.shipbob.com", use: "Stocked inventory scaling" }
+];
 
-function json(data, status = 200, extraHeaders = {}) {
+function json(data, status = 200, extra = {}) {
   return new Response(JSON.stringify(data, null, 2), {
     status,
-    headers: { ...JSON_HEADERS, ...extraHeaders },
+    headers: { "content-type": "application/json; charset=utf-8", ...CORS_HEADERS, ...extra },
   });
 }
 
-function text(data, status = 200, extraHeaders = {}) {
-  return new Response(data, { status, headers: { "content-type": "text/plain; charset=utf-8", ...extraHeaders } });
+function text(data, status = 200, extra = {}) {
+  return new Response(data, {
+    status,
+    headers: { "content-type": "text/plain; charset=utf-8", ...CORS_HEADERS, ...extra },
+  });
 }
 
-async function safeJson(request) {
-  try {
-    return await request.json();
-  } catch {
-    return {};
+function parseBearer(req) {
+  const a = req.headers.get("authorization") || "";
+  if (a.toLowerCase().startsWith("bearer ")) return a.slice(7).trim();
+  return "";
+}
+
+function getOwnerToken(req, env) {
+  return (
+    req.headers.get("x-owner-token") ||
+    parseBearer(req) ||
+    ""
+  );
+}
+
+function isOwner(req, env) {
+  const expected = (env.OWNER_TOKEN || "").trim();
+  if (!expected) return false;
+  const got = getOwnerToken(req, env).trim();
+  return got && got === expected;
+}
+
+function requireOwner(req, env) {
+  if (!isOwner(req, env)) {
+    return json({ ok: false, error: "Unauthorized", route: new URL(req.url).pathname }, 401);
   }
+  return null;
 }
 
-function dayKey() {
-  return new Date().toISOString().slice(0, 10);
-}
-
-async function sha256(input) {
-  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input));
-  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-async function getConsiaUserId(request) {
-  const explicit = request.headers.get("x-consia-user");
-  if (explicit) return explicit.trim();
-
-  const auth = request.headers.get("authorization") || "";
-  if (auth.toLowerCase().startsWith("bearer ")) {
-    const token = auth.slice(7).trim();
-    if (token) return `bearer:${token.slice(0, 24)}`;
-  }
-
-  const ip = request.headers.get("cf-connecting-ip") || "0.0.0.0";
-  const ua = request.headers.get("user-agent") || "unknown";
-  return `anon:${(await sha256(`${ip}|${ua}`)).slice(0, 24)}`;
-}
-
-function getPlan(request) {
-  const raw = (request.headers.get("x-consia-plan") || "FREE").toUpperCase();
+function getPlan(req) {
+  const raw = (req.headers.get("x-consia-plan") || "FREE").toUpperCase();
   return PLAN_LIMITS[raw] ? raw : "FREE";
 }
 
-async function kvGetJson(kv, key, fallback) {
+function utcDayKey() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+async function kvGetJson(kv, key, fallback = null) {
   if (!kv) return fallback;
-  const raw = await kv.get(key);
-  if (!raw) return fallback;
   try {
-    return JSON.parse(raw);
+    const v = await kv.get(key);
+    return v ? JSON.parse(v) : fallback;
   } catch {
     return fallback;
   }
 }
 
 async function kvPutJson(kv, key, value, opts = {}) {
-  if (!kv) return;
+  if (!kv) return false;
   await kv.put(key, JSON.stringify(value), opts);
+  return true;
 }
 
-async function appendAudit(env, event, payload = {}) {
-  if (!env.AUDIT_KV) return;
-  const key = `audit:${dayKey()}`;
-  const current = await kvGetJson(env.AUDIT_KV, key, []);
-  current.push({ ts: new Date().toISOString(), event, payload });
-  if (current.length > 200) current.splice(0, current.length - 200);
-  await kvPutJson(env.AUDIT_KV, key, current, { expirationTtl: 60 * 60 * 24 * 30 });
+function memStore() {
+  const g = globalThis;
+  if (!g.__CONSIA_MEM__) g.__CONSIA_MEM__ = new Map();
+  return g.__CONSIA_MEM__;
 }
 
-async function trackGlobalMetric(env, metric, delta = 1) {
-  if (!env.GLOBAL_STATE_KV) return;
-  const key = `metrics:${dayKey()}`;
-  const m = await kvGetJson(env.GLOBAL_STATE_KV, key, {
-    requests: 0,
-    aiCalls: 0,
-    voiceSessions: 0,
-    ttsChars: 0,
-    wsMessages: 0,
-    wsConnections: 0,
-    errors: 0,
-    budgetUnits: 0,
-    lastUpdated: null,
-  });
-  m[metric] = (m[metric] || 0) + delta;
-  m.lastUpdated = new Date().toISOString();
-  await kvPutJson(env.GLOBAL_STATE_KV, key, m, { expirationTtl: 60 * 60 * 24 * 90 });
+async function getStoreValue(env, key, fallback = null) {
+  if (env.GLOBAL_STATE_KV) return await kvGetJson(env.GLOBAL_STATE_KV, key, fallback);
+  const m = memStore();
+  return m.has(key) ? m.get(key) : fallback;
 }
 
-async function trackUserUsage(env, userId, patch = {}) {
-  if (!env.SESSIONS_KV) return { plan: "FREE", usage: {}, limits: PLAN_LIMITS.FREE };
+async function setStoreValue(env, key, value) {
+  if (env.GLOBAL_STATE_KV) return await kvPutJson(env.GLOBAL_STATE_KV, key, value);
+  memStore().set(key, value);
+  return true;
+}
 
-  const key = `usage:${dayKey()}:${userId}`;
-  const usage = await kvGetJson(env.SESSIONS_KV, key, {
-    requests: 0,
-    aiCalls: 0,
-    voiceSessions: 0,
-    ttsChars: 0,
-    wsRooms: 0,
-    updatedAt: null,
-  });
+async function incrementCounter(env, key, delta = 1) {
+  const cur = (await getStoreValue(env, key, 0)) || 0;
+  const next = Number(cur) + Number(delta);
+  await setStoreValue(env, key, next);
+  return next;
+}
 
-  for (const [k, v] of Object.entries(patch)) {
-    usage[k] = (usage[k] || 0) + v;
+async function enforcePlanAndBudget(req, env, routeName) {
+  const plan = getPlan(req);
+  const limits = PLAN_LIMITS[plan];
+  const day = utcDayKey();
+  const base = `usage:${day}:${plan}`;
+  const reqCount = await incrementCounter(env, `${base}:requests`, 1);
+  if (reqCount > limits.daily_requests) {
+    return { blocked: true, res: json({ ok: false, error: "limit_reached", plan, route: routeName }, 429) };
   }
-  usage.updatedAt = new Date().toISOString();
-  await kvPutJson(env.SESSIONS_KV, key, usage, { expirationTtl: 60 * 60 * 24 * 7 });
-
-  const planState = await kvGetJson(env.SESSIONS_KV, `plan:${userId}`, null);
-  const plan = (planState?.plan || "FREE").toUpperCase();
-  return { plan: PLAN_LIMITS[plan] ? plan : "FREE", usage };
+  const costHeader = Number(req.headers.get("x-consia-cost") || 0);
+  if (costHeader > 0) {
+    const budget = await incrementCounter(env, `${base}:budget_usd`, costHeader);
+    if (budget > limits.daily_budget_usd) {
+      return {
+        blocked: true,
+        res: json({ ok: false, error: "budget_cap_reached", plan, route: routeName, budget }, 429),
+      };
+    }
+  }
+  return { blocked: false, plan, limits };
 }
 
-async function getUserPlanState(env, userId, headerPlan) {
-  const saved = await kvGetJson(env.SESSIONS_KV, `plan:${userId}`, null);
-  const plan = PLAN_LIMITS[(saved?.plan || headerPlan || "FREE").toUpperCase()] ? (saved?.plan || headerPlan || "FREE").toUpperCase() : "FREE";
-  return { plan, source: saved ? "billing" : "header" };
+async function getCatalog(env) {
+  return (await getStoreValue(env, "market:catalog", null)) || DEFAULT_CATALOG;
 }
 
-async function enforceLimits(request, env, routeType, patch) {
-  const userId = await getConsiaUserId(request);
-  const headerPlan = getPlan(request);
-  const planState = await getUserPlanState(env, userId, headerPlan);
-  const limits = PLAN_LIMITS[planState.plan] || PLAN_LIMITS.FREE;
+async function saveCatalog(env, catalog) {
+  await setStoreValue(env, "market:catalog", catalog);
+  return catalog;
+}
 
-  const usageKey = `usage:${dayKey()}:${userId}`;
-  const currentUsage = await kvGetJson(env.SESSIONS_KV, usageKey, {
-    requests: 0,
-    aiCalls: 0,
-    voiceSessions: 0,
-    ttsChars: 0,
-    wsRooms: 0,
+async function audit(env, event, data = {}) {
+  const entry = { ts: new Date().toISOString(), event, ...data };
+  // Append-only best effort (KV list trimmed)
+  const day = utcDayKey();
+  const key = `audit:${day}`;
+  const list = (await getStoreValue(env, key, [])) || [];
+  list.push(entry);
+  if (list.length > 500) list.shift();
+  await setStoreValue(env, key, list);
+  return entry;
+}
+
+async function openAIResponsesText(env, inputText) {
+  if (!env.OPENAI_API_KEY) {
+    return { ok: true, text: "CONSIA CORE ACTIVE (sin OPENAI_API_KEY en este entorno)", model: DEFAULT_MODEL };
+  }
+  const model = env.OPENAI_MODEL || DEFAULT_MODEL;
+  const r = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${env.OPENAI_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model,
+      input: inputText,
+      temperature: 0.6,
+    }),
   });
 
-  const next = { ...currentUsage };
-  for (const [k, v] of Object.entries(patch || {})) next[k] = (next[k] || 0) + v;
-
-  let violated = null;
-  if ((next.requests || 0) > limits.requests) violated = "requests";
-  if ((next.aiCalls || 0) > limits.aiCalls) violated = "aiCalls";
-  if ((next.voiceSessions || 0) > limits.voiceSessions) violated = "voiceSessions";
-  if ((next.ttsChars || 0) > limits.ttsChars) violated = "ttsChars";
-  if ((next.wsRooms || 0) > limits.wsRooms) violated = "wsRooms";
-
-  const globalBudgetLimit = Number(env.MAX_DAILY_BUDGET_UNITS || 0);
-  if (globalBudgetLimit > 0 && env.GLOBAL_STATE_KV) {
-    const gm = await kvGetJson(env.GLOBAL_STATE_KV, `metrics:${dayKey()}`, { budgetUnits: 0 });
-    const projected = (gm.budgetUnits || 0) + (patch?.budgetUnits || 0);
-    if (projected > globalBudgetLimit) violated = violated || "globalBudget";
+  const raw = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    return {
+      ok: false,
+      route: "/ask",
+      error: raw?.error?.message || "OpenAI error",
+      detail: null,
+      upstream_status: r.status,
+      upstream: "responses",
+      raw,
+    };
   }
 
-  if (violated) {
-    await appendAudit(env, "soft_lock", { userId, plan: planState.plan, routeType, violated });
-    const res = json(
-      {
-        ok: false,
-        code: "LIMIT_REACHED",
-        softLock: true,
-        violated,
-        plan: planState.plan,
-        message: "Soft-lock activo: lÃ­mite alcanzado. Upgrade o esperar renovaciÃ³n diaria.",
-      },
-      429,
-      {
-        "x-consia-soft-lock": "1",
-        "x-consia-plan": planState.plan,
+  // Compat parser
+  let textOut = "";
+  if (typeof raw.output_text === "string") textOut = raw.output_text;
+  if (!textOut && Array.isArray(raw.output)) {
+    for (const item of raw.output) {
+      if (Array.isArray(item.content)) {
+        for (const c of item.content) {
+          if (c?.type === "output_text" && c?.text) textOut += c.text;
+          if (c?.type === "text" && c?.text) textOut += c.text;
+        }
       }
-    );
-    return { blocked: true, response: withCors(res, request, env) };
+    }
   }
 
-  await trackUserUsage(env, userId, patch);
-  if (patch?.requests) await trackGlobalMetric(env, "requests", patch.requests);
-  if (patch?.aiCalls) await trackGlobalMetric(env, "aiCalls", patch.aiCalls);
-  if (patch?.voiceSessions) await trackGlobalMetric(env, "voiceSessions", patch.voiceSessions);
-  if (patch?.ttsChars) await trackGlobalMetric(env, "ttsChars", patch.ttsChars);
-  if (patch?.wsRooms) await trackGlobalMetric(env, "wsConnections", patch.wsRooms);
-  if (patch?.budgetUnits) await trackGlobalMetric(env, "budgetUnits", patch.budgetUnits);
-
-  return { blocked: false, userId, plan: planState.plan, limits };
+  return {
+    ok: true,
+    route: "/ask",
+    model,
+    text: textOut || "OK",
+    error: null,
+    detail: null,
+    upstream_status: null,
+    upstream: null,
+    raw: null,
+  };
 }
 
-function requireOwner(request, env) {
-  const token = request.headers.get("x-owner-token") || (request.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
-  return !!(env.OWNER_TOKEN && token && token === env.OWNER_TOKEN);
-}
+async function routeVoiceSession(req, env) {
+  const plan = getPlan(req);
+  const day = utcDayKey();
+  const k = `usage:${day}:${plan}:voice_sessions`;
+  const n = await incrementCounter(env, k, 1);
+  const lim = PLAN_LIMITS[plan].daily_voice_sessions;
+  if (n > lim) return json({ ok: false, error: "voice_limit_reached", plan }, 429);
 
-async function proxyOpenAIRealtimeSession(request, env) {
-  const body = await safeJson(request);
-  if (!env.OPENAI_API_KEY) return json({ ok: false, error: "OPENAI_API_KEY missing" }, 500);
-
-  const model = body.model || env.REALTIME_MODEL || "gpt-4o-realtime-preview";
-  const voice = body.voice || env.REALTIME_VOICE || "verse";
-
-  const upstream = await fetch("https://api.openai.com/v1/realtime/sessions", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${env.OPENAI_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model,
-      voice,
-      modalities: ["audio", "text"],
-      instructions:
-        body.instructions ||
-        env.REALTIME_INSTRUCTIONS ||
-        "Sos CONSIA. Respuestas claras, directas, premium, Ãºtiles y breves. EspaÃ±ol por defecto.",
-      input_audio_transcription: { model: env.TRANSCRIBE_MODEL || "gpt-4o-mini-transcribe" },
-      turn_detection: body.turn_detection || { type: "server_vad" },
-    }),
-  });
-
-  const txt = await upstream.text();
-  let payload;
-  try {
-    payload = JSON.parse(txt);
-  } catch {
-    payload = { raw: txt };
-  }
-
-  if (!upstream.ok) {
-    await appendAudit(env, "voice_session_error", { status: upstream.status, payload });
-    return json({ ok: false, upstreamStatus: upstream.status, error: payload }, upstream.status);
-  }
-
-  await appendAudit(env, "voice_session_ok", { model, voice });
-  return json({ ok: true, ...payload }, 200, { "cache-control": "no-store" });
-}
-
-async function proxyTTS(request, env) {
-  if (!env.OPENAI_API_KEY) return json({ ok: false, error: "OPENAI_API_KEY missing" }, 500);
-  const body = await safeJson(request);
-  const textInput = `${body.text || body.input || ""}`.trim();
-  if (!textInput) return json({ ok: false, error: "text requerido" }, 400);
-
-  const format = (body.format || body.response_format || "mp3").toLowerCase();
-  const model = body.model || env.TTS_MODEL || "gpt-4o-mini-tts";
-  const voice = body.voice || env.TTS_VOICE || "alloy";
-
-  const upstream = await fetch("https://api.openai.com/v1/audio/speech", {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${env.OPENAI_API_KEY}`,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      model,
-      voice,
-      input: textInput,
-      response_format: format,
-    }),
-  });
-
-  if (!upstream.ok) {
-    const errTxt = await upstream.text();
-    await appendAudit(env, "tts_error", { status: upstream.status, errTxt });
-    return json({ ok: false, upstreamStatus: upstream.status, error: errTxt }, upstream.status);
-  }
-
-  const ct = format === "wav" ? "audio/wav" : format === "aac" ? "audio/aac" : "audio/mpeg";
-  await appendAudit(env, "tts_ok", { chars: textInput.length, format, voice });
-  return new Response(upstream.body, {
-    status: 200,
-    headers: {
-      "content-type": ct,
-      "cache-control": "no-store",
-      "x-consia-voice": voice,
-      "x-consia-format": format,
-    },
-  });
-}
-
-async function proxyAsk(request, env) {
-  const body = await safeJson(request);
-  const message = (body.message || body.input || "").trim();
-  if (!message) return json({ ok: false, error: "message requerido" }, 400);
-  if (!env.OPENAI_API_KEY) return json({ ok: false, error: "OPENAI_API_KEY missing" }, 500);
-
-  const model = body.model || env.CHAT_MODEL || "gpt-4o-mini";
-  const upstream = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${env.OPENAI_API_KEY}`,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      model,
-      messages: [
-        {
-          role: "system",
-          content:
-            env.CONSIA_SYSTEM_PROMPT ||
-            "Sos CONSIA. Asistente premium, directo, Ãºtil, seguro, con foco en ejecuciÃ³n y claridad.",
-        },
-        { role: "user", content: message },
-      ],
-      temperature: typeof body.temperature === "number" ? body.temperature : 0.4,
-    }),
-  });
-
-  const txt = await upstream.text();
-  let payload;
-  try {
-    payload = JSON.parse(txt);
-  } catch {
-    payload = { raw: txt };
-  }
-
-  if (!upstream.ok) {
-    await appendAudit(env, "ask_error", { status: upstream.status, payload });
-    return json({ ok: false, upstreamStatus: upstream.status, error: payload }, upstream.status);
-  }
-
-  const answer = payload?.choices?.[0]?.message?.content || "";
-  await appendAudit(env, "ask_ok", { chars: message.length });
-  return json({ ok: true, answer, usage: payload.usage || null, raw: payload });
-}
-
-async function handleBillingWebhook(request, env) {
-  const secret = request.headers.get("x-consia-webhook-secret") || "";
-  if (!env.BILLING_WEBHOOK_SECRET || secret !== env.BILLING_WEBHOOK_SECRET) {
-    return json({ ok: false, error: "unauthorized" }, 401);
-  }
-  const body = await safeJson(request);
-  const userId = `${body.userId || body.user_id || ""}`.trim();
-  const plan = `${body.plan || "FREE"}`.toUpperCase();
-  if (!userId || !PLAN_LIMITS[plan]) return json({ ok: false, error: "userId/plan invÃ¡lido" }, 400);
-
-  await kvPutJson(env.SESSIONS_KV, `plan:${userId}`, {
-    plan,
-    status: body.status || "active",
-    source: body.source || "webhook",
-    updatedAt: new Date().toISOString(),
-    meta: body.meta || null,
-  });
-  await appendAudit(env, "billing_plan_update", { userId, plan });
-  return json({ ok: true, userId, plan });
-}
-
-async function handleAdminMetrics(request, env) {
-  if (!requireOwner(request, env)) return json({ ok: false, error: "unauthorized" }, 401);
-
-  const today = await kvGetJson(env.GLOBAL_STATE_KV, `metrics:${dayKey()}`, {});
-  const yesterdayKey = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
-  const yesterday = await kvGetJson(env.GLOBAL_STATE_KV, `metrics:${yesterdayKey}`, {});
-  const audits = await kvGetJson(env.AUDIT_KV, `audit:${dayKey()}`, []);
+  // Provider selection is declarative; actual provider keys stay server-side.
+  const provider = env.VOICE_PROVIDER || "openai";
+  const avatarProvider = env.AVATAR_PROVIDER || "runway_hybrid";
+  const langs = ["es", "en", "pt"];
+  const voices = (env.ALLOWED_VOICES || "neutral-1,neutral-2,warm-1").split(",").map(v => v.trim());
 
   return json({
     ok: true,
-    date: dayKey(),
-    today,
-    yesterday,
-    auditCount: audits.length,
-    lastAudit: audits.slice(-20),
-    config: {
-      realtimeModel: env.REALTIME_MODEL || "gpt-4o-realtime-preview",
-      ttsModel: env.TTS_MODEL || "gpt-4o-mini-tts",
-      chatModel: env.CHAT_MODEL || "gpt-4o-mini",
-      maxDailyBudgetUnits: Number(env.MAX_DAILY_BUDGET_UNITS || 0),
+    route: "/voice/session",
+    session: {
+      id: crypto.randomUUID(),
+      provider,
+      avatar_provider: avatarProvider,
+      mode: "realtime",
+      ws_url: `${new URL(req.url).origin.replace(/^http/, "ws")}/ws?room=voice-main`,
+      languages: langs,
+      voices,
+      expires_in_sec: 600,
     },
   });
 }
 
-async function handleAdminSetPlan(request, env) {
-  if (!requireOwner(request, env)) return json({ ok: false, error: "unauthorized" }, 401);
-  const body = await safeJson(request);
-  const userId = `${body.userId || ""}`.trim();
-  const plan = `${body.plan || ""}`.toUpperCase();
-  if (!userId || !PLAN_LIMITS[plan]) return json({ ok: false, error: "userId/plan invÃ¡lido" }, 400);
-
-  await kvPutJson(env.SESSIONS_KV, `plan:${userId}`, {
-    plan,
-    status: "active",
-    source: "owner",
-    updatedAt: new Date().toISOString(),
+async function routeVoiceChunk(req, env) {
+  // Base endpoint to receive mic chunks from browser. Real STT upstream can be wired later.
+  const contentType = req.headers.get("content-type") || "";
+  const buf = await req.arrayBuffer();
+  await audit(env, "voice_chunk", { bytes: buf.byteLength, contentType });
+  return json({
+    ok: true,
+    route: "/voice/chunk",
+    bytes: buf.byteLength,
+    content_type: contentType,
+    transcript: null,
+    note: "chunk recibido (STT upstream opcional)",
   });
-  await appendAudit(env, "owner_set_plan", { userId, plan });
-  return json({ ok: true, userId, plan });
 }
 
-async function routeRealtimeWS(request, env) {
-  if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
-    return json({ ok: false, error: "WebSocket upgrade requerido" }, 426);
+async function routeAsk(req, env) {
+  const enforce = await enforcePlanAndBudget(req, env, "/ask");
+  if (enforce.blocked) return enforce.res;
+
+  const body = await req.json().catch(() => ({}));
+  const message = String(body.message || body.input || "").trim();
+  if (!message) return json({ ok: false, error: "Missing message", route: "/ask" }, 400);
+
+  const result = await openAIResponsesText(env, message);
+  await audit(env, "ask", { plan: getPlan(req), ok: !!result.ok });
+
+  return json(result, result.ok ? 200 : 500);
+}
+
+async function routeMarketCatalog(req, env) {
+  const catalog = await getCatalog(env);
+  const q = new URL(req.url).searchParams;
+  const category = (q.get("category") || "").toLowerCase();
+  const dropship = q.get("dropship");
+  let rows = catalog;
+  if (category) rows = rows.filter((x) => String(x.category || "").toLowerCase().includes(category));
+  if (dropship === "1") rows = rows.filter((x) => !!x.dropship_ready);
+
+  return json({
+    ok: true,
+    route: "/market/catalog",
+    count: rows.length,
+    items: rows.sort((a, b) => (b.bestseller_score || 0) - (a.bestseller_score || 0)),
+  });
+}
+
+async function routeMarketBootstrap(req, env) {
+  const authErr = requireOwner(req, env);
+  if (authErr) return authErr;
+  await saveCatalog(env, DEFAULT_CATALOG);
+  await audit(env, "market_bootstrap", { count: DEFAULT_CATALOG.length });
+  return json({ ok: true, route: "/owner/market/bootstrap", count: DEFAULT_CATALOG.length });
+}
+
+async function routeMarketUpsert(req, env) {
+  const authErr = requireOwner(req, env);
+  if (authErr) return authErr;
+  const body = await req.json().catch(() => ({}));
+  if (!body?.id || !body?.name) return json({ ok: false, error: "id and name required" }, 400);
+  const catalog = await getCatalog(env);
+  const idx = catalog.findIndex((x) => x.id === body.id);
+  const next = { ...catalog[idx] || {}, ...body };
+  if (idx >= 0) catalog[idx] = next; else catalog.push(next);
+  await saveCatalog(env, catalog);
+  await audit(env, "market_upsert", { id: next.id });
+  return json({ ok: true, route: "/owner/market/product", item: next });
+}
+
+async function routeSuppliers(req, env) {
+  return json({
+    ok: true,
+    route: "/market/suppliers",
+    items: SUPPLIER_DIRECTORY,
+    note: "Directorio de proveedores para sourcing/dropshipping. VinculaciÃ³n operativa se hace por cuenta owner.",
+  });
+}
+
+async function routeCheckout(req, env) {
+  const enforce = await enforcePlanAndBudget(req, env, "/market/checkout");
+  if (enforce.blocked) return enforce.res;
+  const body = await req.json().catch(() => ({}));
+  const { product_id, qty = 1, buyer = {} } = body || {};
+  if (!product_id) return json({ ok: false, error: "product_id required" }, 400);
+  const catalog = await getCatalog(env);
+  const p = catalog.find((x) => x.id === product_id);
+  if (!p) return json({ ok: false, error: "Product not found" }, 404);
+
+  const order = {
+    order_id: `ord_${Date.now()}`,
+    product_id,
+    qty,
+    subtotal_usd: Number((p.price_usd * Number(qty)).toFixed(2)),
+    status: "created",
+    buyer,
+    dropship_ready: !!p.dropship_ready,
+    supplier_flow: p.dropship_ready ? "auto_routing_candidate" : "inventory_or_odm",
+    created_at: new Date().toISOString(),
+  };
+  await setStoreValue(env, `order:${order.order_id}`, order);
+  await audit(env, "checkout_created", { order_id: order.order_id, product_id, qty });
+  return json({ ok: true, route: "/market/checkout", order });
+}
+
+async function routeDropshipDispatch(req, env) {
+  const authErr = requireOwner(req, env);
+  if (authErr) return authErr;
+  const body = await req.json().catch(() => ({}));
+  const { order_id, supplier } = body || {};
+  const order = await getStoreValue(env, `order:${order_id}`, null);
+  if (!order) return json({ ok: false, error: "Order not found" }, 404);
+
+  // SimulaciÃ³n fail-closed: no dispara terceros sin config explÃ­cita
+  if (!env.DROPSHIP_AUTOMATION_ENABLED || env.DROPSHIP_AUTOMATION_ENABLED !== "true") {
+    order.status = "ready_for_manual_dispatch";
+    order.dispatch = { mode: "manual", supplier: supplier || null };
+    await setStoreValue(env, `order:${order_id}`, order);
+    await audit(env, "dropship_manual_queue", { order_id, supplier: supplier || null });
+    return json({
+      ok: true,
+      route: "/owner/dropship/dispatch",
+      dispatched: false,
+      order,
+      note: "Modo seguro: dispatch manual. ActivÃ¡ DROPSHIP_AUTOMATION_ENABLED=true para automatizaciÃ³n.",
+    });
   }
 
-  const url = new URL(request.url);
-  const room = url.pathname.split("/").pop() || "global";
-  const id = env.MEETING_DO.idFromName(room);
-  const stub = env.MEETING_DO.get(id);
-  return stub.fetch("https://do/realtime/" + room, {
-    headers: request.headers,
+  // AquÃ­ irÃ­an integraciones reales (CJ/DSers/Shopify/etc.)
+  order.status = "dispatched";
+  order.dispatch = { mode: "auto", supplier: supplier || "router_default", ts: new Date().toISOString() };
+  await setStoreValue(env, `order:${order_id}`, order);
+  await audit(env, "dropship_dispatched", { order_id, supplier: order.dispatch.supplier });
+  return json({ ok: true, route: "/owner/dropship/dispatch", dispatched: true, order });
+}
+
+async function routePlans(req, env) {
+  return json({
+    ok: true,
+    route: "/plans",
+    plans: PLAN_LIMITS,
+    billing_mode: env.BILLING_MODE || "manual|paddle|stripe",
+    default_currency: "USD",
   });
+}
+
+async function routeAdminMetrics(req, env) {
+  const authErr = requireOwner(req, env);
+  if (authErr) return authErr;
+  const day = utcDayKey();
+  const metrics = {};
+  for (const plan of Object.keys(PLAN_LIMITS)) {
+    metrics[plan] = {
+      requests: (await getStoreValue(env, `usage:${day}:${plan}:requests`, 0)) || 0,
+      budget_usd: (await getStoreValue(env, `usage:${day}:${plan}:budget_usd`, 0)) || 0,
+      voice_sessions: (await getStoreValue(env, `usage:${day}:${plan}:voice_sessions`, 0)) || 0,
+    };
+  }
+  const auditDay = (await getStoreValue(env, `audit:${day}`, [])) || [];
+  return json({
+    ok: true,
+    route: "/admin/metrics",
+    day,
+    metrics,
+    audit_events: auditDay.slice(-50),
+    env: env.ENV || "prod",
+  });
+}
+
+async function routeOwnerPing(req, env) {
+  const authErr = requireOwner(req, env);
+  if (authErr) return authErr;
+  return json({ ok: true, owner: true, service: "CONSIA", status: "secure" });
+}
+
+async function routeMeetPing(req, env) {
+  return json({
+    ok: true,
+    service: "consia-api",
+    status: "healthy",
+    ts: new Date().toISOString(),
+    env: env.ENV || "prod",
+  });
+}
+
+async function routeVoiceToken(req, env) {
+  // Alias Ãºtil para tests rÃ¡pidos
+  return routeVoiceSession(req, env);
+}
+
+async function proxyWsToDO(request, env) {
+  const url = new URL(request.url);
+  const room = (url.searchParams.get("room") || "main").slice(0, 64);
+  const user = (url.searchParams.get("user") || "anon").slice(0, 64);
+
+  if (!env.CONSIA_STATE) return json({ ok: false, error: "CONSIA_STATE binding missing" }, 500);
+  const id = env.CONSIA_STATE.idFromName(`room:${room}`);
+  const stub = env.CONSIA_STATE.get(id);
+  const upstreamUrl = new URL(request.url);
+  upstreamUrl.pathname = "/_do/ws";
+  upstreamUrl.searchParams.set("room", room);
+  upstreamUrl.searchParams.set("user", user);
+
+  return stub.fetch(upstreamUrl.toString(), request);
+}
+
+async function routeWsRoomState(req, env) {
+  const authErr = requireOwner(req, env);
+  if (authErr) return authErr;
+  const room = new URL(req.url).searchParams.get("room") || "main";
+  const id = env.CONSIA_STATE.idFromName(`room:${room}`);
+  const stub = env.CONSIA_STATE.get(id);
+  const r = await stub.fetch("https://do.local/state");
+  return new Response(r.body, { status: r.status, headers: { ...Object.fromEntries(r.headers), ...CORS_HEADERS } });
 }
 
 export default {
   async fetch(request, env, ctx) {
-    const started = Date.now();
-    if (request.method === "OPTIONS") {
-      return withCors(new Response(null, { status: 204 }), request, env);
-    }
-
-    const url = new URL(request.url);
-    const path = url.pathname;
+    if (request.method === "OPTIONS") return new Response(null, { headers: CORS_HEADERS });
 
     try {
-      // Base routes
-      if (request.method === "GET" && path === "/") {
-        return withCors(text("CONSIA CORE ACTIVE"), request, env);
-      }
-      if (path === "/ping") {
-        return withCors(
-          json({
-            ok: true,
-            name: "CONSIA API",
-            status: "active",
-            ts: new Date().toISOString(),
-            ws: "/realtime/:room",
-            voiceSession: "/voice/session",
-            voiceToken: "/voice/token",
-            tts: "/voice/tts",
-          }),
-          request,
-          env
-        );
-      }
-      if (path === "/health") {
-        return withCors(
-          json({
-            ok: true,
-            service: "consia-api",
-            version: "top1-live",
-            hasOpenAI: !!env.OPENAI_API_KEY,
-            hasOwner: !!env.OWNER_TOKEN,
-            doBindings: {
-              CONSIA_STATE: !!env.CONSIA_STATE,
-              MEETING_DO: !!env.MEETING_DO,
-            },
-            kvBindings: {
-              AUDIT_KV: !!env.AUDIT_KV,
-              GLOBAL_STATE_KV: !!env.GLOBAL_STATE_KV,
-              PRESENCE_KV: !!env.PRESENCE_KV,
-              SESSIONS_KV: !!env.SESSIONS_KV,
-              VAULT_KV: !!env.VAULT_KV,
-            },
-          }),
-          request,
-          env
-        );
+      const url = new URL(request.url);
+      const path = url.pathname;
+
+      if (path === "/" && request.method === "GET") return text("CONSIA API OK");
+      if (path === "/meet/ping" && request.method === "GET") return routeMeetPing(request, env);
+      if (path === "/owner/ping" && request.method === "GET") return routeOwnerPing(request, env);
+
+      if (path === "/ask" && request.method === "POST") return routeAsk(request, env);
+
+      if (path === "/plans" && request.method === "GET") return routePlans(request, env);
+      if (path === "/admin/metrics" && request.method === "GET") return routeAdminMetrics(request, env);
+
+      if (path === "/market/catalog" && request.method === "GET") return routeMarketCatalog(request, env);
+      if (path === "/market/suppliers" && request.method === "GET") return routeSuppliers(request, env);
+      if (path === "/market/checkout" && request.method === "POST") return routeCheckout(request, env);
+
+      if (path === "/owner/market/bootstrap" && request.method === "POST") return routeMarketBootstrap(request, env);
+      if (path === "/owner/market/product" && request.method === "POST") return routeMarketUpsert(request, env);
+      if (path === "/owner/dropship/dispatch" && request.method === "POST") return routeDropshipDispatch(request, env);
+      if (path === "/owner/rooms/state" && request.method === "GET") return routeWsRoomState(request, env);
+
+      if (path === "/voice/token" && request.method === "GET") return routeVoiceToken(request, env);
+      if (path === "/voice/session" && request.method === "GET") return routeVoiceSession(request, env);
+      if (path === "/voice/chunk" && request.method === "POST") return routeVoiceChunk(request, env);
+
+      if (path === "/ws" && request.headers.get("upgrade")?.toLowerCase() === "websocket") {
+        return proxyWsToDO(request, env);
       }
 
-      // Realtime room ws
-      if (path.startsWith("/realtime/")) {
-        const gate = await enforceLimits(request, env, "ws", { requests: 1, wsRooms: 1, budgetUnits: 1 });
-        if (gate.blocked) return gate.response;
-        return withCors(await routeRealtimeWS(request, env), request, env);
-      }
-
-      // Voice realtime session token
-      if (request.method === "POST" && (path === "/voice/session" || path === "/voice/token")) {
-        const gate = await enforceLimits(request, env, "voiceSession", { requests: 1, voiceSessions: 1, budgetUnits: 4 });
-        if (gate.blocked) return gate.response;
-        const res = await proxyOpenAIRealtimeSession(request, env);
-        return withCors(res, request, env);
-      }
-
-      // TTS / Avatar voice sync audio source
-      if (request.method === "POST" && (path === "/voice/tts" || path === "/avatar/tts")) {
-        const body = await safeJson(request.clone());
-        const chars = `${body.text || body.input || ""}`.length;
-        const gate = await enforceLimits(request, env, "tts", {
-          requests: 1,
-          ttsChars: chars,
-          budgetUnits: Math.max(1, Math.ceil(chars / 300)),
-        });
-        if (gate.blocked) return gate.response;
-        const res = await proxyTTS(request, env);
-        return withCors(res, request, env);
-      }
-
-      // AI text endpoint
-      if (request.method === "POST" && path === "/ask") {
-        const gate = await enforceLimits(request, env, "ask", { requests: 1, aiCalls: 1, budgetUnits: 2 });
-        if (gate.blocked) return gate.response;
-        const res = await proxyAsk(request, env);
-        return withCors(res, request, env);
-      }
-
-      // Billing webhook
-      if (request.method === "POST" && path === "/billing/webhook") {
-        const res = await handleBillingWebhook(request, env);
-        return withCors(res, request, env);
-      }
-
-      // Admin
-      if (request.method === "GET" && path === "/admin/metrics") {
-        const res = await handleAdminMetrics(request, env);
-        return withCors(res, request, env);
-      }
-      if (request.method === "POST" && path === "/admin/set-plan") {
-        const res = await handleAdminSetPlan(request, env);
-        return withCors(res, request, env);
-      }
-
-      // Presence snapshot
-      if (request.method === "GET" && path === "/presence") {
-        const room = url.searchParams.get("room") || "global";
-        const presence = await kvGetJson(env.PRESENCE_KV, `presence:${room}`, { room, users: 0, updatedAt: null });
-        return withCors(json({ ok: true, ...presence }), request, env);
-      }
-
-      // Vault quick save/read (Owner-Only)
-      if (path === "/vault/save" && request.method === "POST") {
-        if (!requireOwner(request, env)) return withCors(json({ ok: false, error: "unauthorized" }, 401), request, env);
-        const body = await safeJson(request);
-        const key = body.key || `vault/${dayKey()}/${Date.now()}`;
-        await kvPutJson(env.VAULT_KV, key, { ...body, savedAt: new Date().toISOString() }, { expirationTtl: 60 * 60 * 24 * 3650 });
-        return withCors(json({ ok: true, key }), request, env);
-      }
-      if (path === "/vault/get" && request.method === "GET") {
-        if (!requireOwner(request, env)) return withCors(json({ ok: false, error: "unauthorized" }, 401), request, env);
-        const key = url.searchParams.get("key");
-        if (!key) return withCors(json({ ok: false, error: "key requerido" }, 400), request, env);
-        const data = await kvGetJson(env.VAULT_KV, key, null);
-        return withCors(json({ ok: true, key, data }), request, env);
-      }
-
-      return withCors(json({ ok: false, error: "Route not found", path }, 404), request, env);
+      return json({ ok: false, error: "Not found", path }, 404);
     } catch (err) {
-      await trackGlobalMetric(env, "errors", 1);
-      await appendAudit(env, "worker_error", { path, error: String(err?.stack || err) });
-      const res = json({ ok: false, error: String(err?.message || err) }, 500);
-      return withCors(res, request, env);
-    } finally {
-      const ms = Date.now() - started;
-      ctx.waitUntil(trackGlobalMetric(env, "lastResponseMs", ms));
+      return json({ ok: false, error: String(err?.message || err) }, 500);
     }
   },
 };
@@ -581,127 +644,127 @@ export class ConsiaState {
   constructor(state, env) {
     this.state = state;
     this.env = env;
-  }
-
-  async fetch(request) {
-    const url = new URL(request.url);
-    if (request.method === "GET" && url.pathname.endsWith("/get")) {
-      const key = url.searchParams.get("key") || "default";
-      const val = await this.state.storage.get(key);
-      return json({ ok: true, key, value: val ?? null });
-    }
-
-    if (request.method === "POST" && url.pathname.endsWith("/set")) {
-      const body = await safeJson(request);
-      const key = body.key || "default";
-      await this.state.storage.put(key, body.value ?? null);
-      return json({ ok: true, key });
-    }
-
-    if (request.method === "GET" && url.pathname.endsWith("/snapshot")) {
-      const list = await this.state.storage.list({ limit: 100 });
-      const out = {};
-      for (const [k, v] of list) out[k] = v;
-      return json({ ok: true, data: out });
-    }
-
-    return json({ ok: false, error: "ConsiaState route not found" }, 404);
-  }
-}
-
-export class MeetingRoom {
-  constructor(state, env) {
-    this.state = state;
-    this.env = env;
     this.sockets = new Map();
-    this.room = null;
+    this.room = "main";
+    this.createdAt = Date.now();
   }
 
   async fetch(request) {
     const url = new URL(request.url);
-    this.room = this.room || url.pathname.split("/").pop() || "global";
 
-    if (request.headers.get("Upgrade")?.toLowerCase() === "websocket") {
+    if (url.pathname === "/_do/ws" && request.headers.get("upgrade")?.toLowerCase() === "websocket") {
       const pair = new WebSocketPair();
-      const [client, server] = Object.values(pair);
-      const socketId = crypto.randomUUID();
-      const user = request.headers.get("x-consia-user") || `anon-${socketId.slice(0, 8)}`;
-
+      const client = pair[0];
+      const server = pair[1];
       server.accept();
-      this.sockets.set(socketId, { ws: server, user });
 
-      await this._updatePresence();
-      this._broadcast({ type: "presence", room: this.room, users: this.sockets.size });
-      this._broadcast({ type: "join", room: this.room, user, socketId });
+      const room = (url.searchParams.get("room") || "main").slice(0, 64);
+      const user = (url.searchParams.get("user") || "anon").slice(0, 64);
+      this.room = room;
 
-      server.addEventListener("message", async (evt) => {
-        let payload;
+      const socketId = crypto.randomUUID();
+      this.sockets.set(socketId, { ws: server, user, joinedAt: Date.now() });
+
+      this.broadcast({
+        type: "presence",
+        event: "join",
+        room,
+        user,
+        socket_id: socketId,
+        members: this.sockets.size,
+        ts: new Date().toISOString(),
+      });
+
+      server.addEventListener("message", (evt) => {
+        let data = evt.data;
+        let payload = null;
         try {
-          payload = JSON.parse(evt.data);
+          payload = typeof data === "string" ? JSON.parse(data) : { binary: true, bytes: data?.byteLength || 0 };
         } catch {
-          payload = { type: "message", text: String(evt.data) };
+          payload = { text: typeof data === "string" ? data : "[binary]" };
         }
 
+        // Ping loop + broadcast
         if (payload?.type === "ping") {
-          server.send(JSON.stringify({ type: "pong", ts: Date.now() }));
+          try {
+            server.send(JSON.stringify({ type: "pong", ts: Date.now(), room, members: this.sockets.size }));
+          } catch {}
           return;
         }
 
-        this._broadcast({
-          type: payload.type || "message",
-          room: this.room,
+        this.broadcast({
+          type: "message",
+          room,
           from: user,
-          socketId,
-          data: payload,
-          ts: Date.now(),
+          payload,
+          ts: new Date().toISOString(),
         });
-
-        if (this.env?.GLOBAL_STATE_KV) {
-          const key = `metrics:${dayKey()}`;
-          const m = await kvGetJson(this.env.GLOBAL_STATE_KV, key, { wsMessages: 0 });
-          m.wsMessages = (m.wsMessages || 0) + 1;
-          m.lastUpdated = new Date().toISOString();
-          await kvPutJson(this.env.GLOBAL_STATE_KV, key, m, { expirationTtl: 60 * 60 * 24 * 90 });
-        }
       });
 
-      const onClose = async () => {
+      const cleanup = () => {
         this.sockets.delete(socketId);
-        await this._updatePresence();
-        this._broadcast({ type: "leave", room: this.room, user, socketId });
-        this._broadcast({ type: "presence", room: this.room, users: this.sockets.size });
+        this.broadcast({
+          type: "presence",
+          event: "leave",
+          room,
+          user,
+          socket_id: socketId,
+          members: this.sockets.size,
+          ts: new Date().toISOString(),
+        });
       };
 
-      server.addEventListener("close", onClose);
-      server.addEventListener("error", onClose);
+      server.addEventListener("close", cleanup);
+      server.addEventListener("error", cleanup);
+
+      // Welcome
+      try {
+        server.send(
+          JSON.stringify({
+            type: "welcome",
+            room,
+            user,
+            socket_id: socketId,
+            members: this.sockets.size,
+            ts: new Date().toISOString(),
+          })
+        );
+      } catch {}
 
       return new Response(null, { status: 101, webSocket: client });
     }
 
-    if (request.method === "GET") {
-      return json({ ok: true, room: this.room, users: this.sockets.size });
+    if (url.pathname === "/state") {
+      const members = [];
+      for (const [id, item] of this.sockets.entries()) {
+        members.push({ socket_id: id, user: item.user, joinedAt: item.joinedAt });
+      }
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          room: this.room,
+          members_count: this.sockets.size,
+          uptime_sec: Math.round((Date.now() - this.createdAt) / 1000),
+          members,
+        }),
+        { headers: { "content-type": "application/json" } }
+      );
     }
 
-    return json({ ok: false, error: "MeetingRoom route not found" }, 404);
+    return new Response(JSON.stringify({ ok: false, error: "DO route not found" }), {
+      status: 404,
+      headers: { "content-type": "application/json" },
+    });
   }
 
-  _broadcast(obj) {
+  broadcast(obj) {
     const msg = JSON.stringify(obj);
-    for (const { ws } of this.sockets.values()) {
+    for (const [id, item] of this.sockets.entries()) {
       try {
-        ws.send(msg);
+        item.ws.send(msg);
       } catch {
-        // ignore dead sockets
+        this.sockets.delete(id);
       }
     }
-  }
-
-  async _updatePresence() {
-    if (!this.env?.PRESENCE_KV) return;
-    await kvPutJson(this.env.PRESENCE_KV, `presence:${this.room}`, {
-      room: this.room,
-      users: this.sockets.size,
-      updatedAt: new Date().toISOString(),
-    }, { expirationTtl: 60 * 60 * 24 * 7 });
   }
 }
